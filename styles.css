@@ -541,3 +541,7 @@ input { font: inherit; color: inherit; }
 }
 .suggest-wrap.missing .warn { display: block; }
 .suggest-wrap.missing .txt { padding-right: 30px; }
+
+/* Monatssumme neben dem Monatsnamen */
+.month-head { display: flex; justify-content: space-between; align-items: baseline; }
+.month-total { text-transform: none; font-variant-numeric: tabular-nums; font-weight: 600; color: var(--text); }

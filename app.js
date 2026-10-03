@@ -110,7 +110,6 @@ const DEFAULT_SETTINGS = {
   hoursPerDay: 8,
   minuteStep: 15,
   hourFormat: 'dec',
-  pdfFrame: false,
   credit: { krank: true, urlaub: true, feiertag: true, frei: false },
 };
 
@@ -126,7 +125,8 @@ function readJson(key, fallback) {
 let sheets = readJson(STORE_KEY, []);
 let settings = { ...DEFAULT_SETTINGS, ...readJson(SETTINGS_KEY, {}) };
 settings.credit = { ...DEFAULT_SETTINGS.credit, ...settings.credit };
-delete settings.recipient; // frühere Einstellung, wird nicht mehr verwendet
+delete settings.recipient; // frühere Einstellungen, werden nicht mehr verwendet
+delete settings.pdfFrame;
 
 /** Urlaubs- und Krankheitstage je Jahr (nach Datum des Tages) */
 function absenceStats() {
@@ -252,7 +252,8 @@ function renderList() {
     ? keys
         .map((k) => {
           const list = groups.get(k).sort((a, b) => sheetFirstDate(b) - sheetFirstDate(a));
-          return `<h2 class="section-title">${MONTHS[(k % 100) - 1]} ${Math.floor(k / 100)}</h2>
+          const monthTotal = list.reduce((t, sh) => t + sheetTotal(sh), 0);
+          return `<h2 class="section-title month-head"><span>${MONTHS[(k % 100) - 1]} ${Math.floor(k / 100)}</span><span class="month-total">Gesamt ${fmtH(monthTotal)}</span></h2>
           <div class="card list">${list.map(listRowHTML).join('')}</div>`;
         })
         .join('')
@@ -628,12 +629,6 @@ function renderSettings() {
         </select></label>
     </div>
     <p class="footnote">Die Zeitschritte gelten für Arbeitsbeginn, Arbeitsende und Pause. Das Stundenformat gilt für Stunden, Pause und Summen in der App und im PDF.</p>
-
-    <h2 class="section-title">PDF</h2>
-    <div class="card form">
-      <label class="field toggle-field"><span>Rahmen (Kältetechnik)</span><input type="checkbox" class="toggle" data-s="pdfFrame" ${settings.pdfFrame ? 'checked' : ''}></label>
-    </div>
-    <p class="footnote">Druckt den Stundenzettel in einem Rahmen mit Rohrleitung, Manometer, FSK-Schild und Yeti.</p>
 
     <h2 class="section-title">Überstunden</h2>
     <div class="card form">
@@ -1035,8 +1030,6 @@ document.addEventListener('input', (e) => {
     } else if (key === 'target' || key === 'hoursPerDay') {
       const v = parseFloat(t.value.replace(',', '.'));
       if (!Number.isNaN(v) && v >= 0) settings[key] = v;
-    } else if (key === 'pdfFrame') {
-      settings.pdfFrame = t.checked;
     } else if (key === 'minuteStep') {
       settings.minuteStep = Number(t.value);
     } else if (key.startsWith('credit.')) {

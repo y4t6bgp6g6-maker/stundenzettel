@@ -1,12 +1,11 @@
 // Offline-Cache: Mit Internet wird immer die neueste Version geladen, ohne Internet die gespeicherte.
-const CACHE = 'stundenzettel-v7';
+const CACHE = 'stundenzettel-v8';
 const ASSETS = [
   './',
   'index.html',
   'styles.css',
   'app.js',
   'pdf.js',
-  'frame.js',
   'manifest.webmanifest',
   'icons/apple-touch-icon.png',
   'icons/icon-192.png',
