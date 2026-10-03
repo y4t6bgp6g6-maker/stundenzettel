@@ -111,7 +111,6 @@ const DEFAULT_SETTINGS = {
   minuteStep: 15,
   hourFormat: 'dec',
   state: 'NI',
-  accountStart: '', // leer = ab dem ersten Stundenzettel
   credit: { krank: true, urlaub: true, feiertag: true, frei: false },
 };
 
@@ -129,6 +128,7 @@ let settings = { ...DEFAULT_SETTINGS, ...readJson(SETTINGS_KEY, {}) };
 settings.credit = { ...DEFAULT_SETTINGS.credit, ...settings.credit };
 delete settings.recipient; // frühere Einstellungen, werden nicht mehr verwendet
 delete settings.pdfFrame;
+delete settings.accountStart;
 
 /** Urlaubs- und Krankheitstage je Jahr (nach Datum des Tages) */
 function absenceStats() {
@@ -144,17 +144,6 @@ function absenceStats() {
   return years;
 }
 
-/** Erster Tag des Überstunden-Kontos: Einstellung oder erster Tag mit Stundenzettel */
-function accountStartDate() {
-  if (settings.accountStart) return parseDate(settings.accountStart);
-  let first = null;
-  for (const s of sheets) {
-    const d = sheetFirstDate(s);
-    if (!first || d < first) first = d;
-  }
-  return first;
-}
-
 /**
  * Überstunden-Konto je Monat: Ist − Soll, Tag für Tag – nur Tage, für die es einen Stundenzettel gibt.
  * Wochen ohne Zettel kommen in der Rechnung nicht vor.
@@ -164,14 +153,12 @@ function accountStartDate() {
  */
 function overtimeAccount() {
   const result = new Map();
-  const start = accountStartDate();
-  if (!start) return result;
   const dailySoll = Math.round((settings.target * 60) / 5);
   const today = startOfDay(new Date());
   for (const s of sheets) {
     s.days.forEach((d, i) => {
       const date = sheetDate(s, i);
-      if (!sheetIsActive(s, i) || date < start || date > today) return;
+      if (!sheetIsActive(s, i) || date > today) return;
       const soll = i < 5 ? dailySoll : 0;
       const y = date.getFullYear();
       const m = date.getMonth() + 1;
@@ -403,7 +390,7 @@ function renderStats() {
       })
       .join('')}
     <p class="footnote">Urlaubs- und Krankheitstage: alle so markierten Tage auf deinen Stundenzetteln.</p>
-    ${settings.overtime && accountStartDate() ? `<p class="footnote">Überstunden je Monat: Stunden Gesamt aller Tage minus Soll (${fmtH(Math.round((settings.target * 60) / 5))} je Werktag Mo–Fr). Gezählt werden nur Tage mit Stundenzettel bis heute; Wochen ohne Zettel bleiben außen vor. Plus- und Minusstunden werden verrechnet. Konto ab ${fmtShort(accountStartDate())}.</p>` : ''}`;
+    ${settings.overtime && sheets.length ? `<p class="footnote">Überstunden je Monat: Stunden Gesamt aller Tage minus Soll (${fmtH(Math.round((settings.target * 60) / 5))} je Werktag Mo–Fr). Gezählt werden nur Tage mit Stundenzettel bis heute; Wochen ohne Zettel bleiben außen vor. Plus- und Minusstunden werden verrechnet.</p>` : ''}`;
 }
 
 function overtimeYearHTML(year, months) {
@@ -756,9 +743,8 @@ function renderSettings() {
     <div class="card form">
       <label class="field toggle-field"><span>Überstunden berechnen</span><input type="checkbox" class="toggle" data-s="overtime" ${settings.overtime ? 'checked' : ''}></label>
       <label class="field ${settings.overtime ? '' : 'disabled'}" id="target-field"><span>Soll pro Woche (h)</span><input data-s="target" type="text" inputmode="decimal" value="${String(settings.target).replace('.', ',')}" ${settings.overtime ? '' : 'disabled'} enterkeyhint="done"></label>
-      <label class="field ${settings.overtime ? '' : 'disabled'}" id="start-field"><span>Konto ab</span><input data-s="accountStart" type="date" value="${settings.accountStart}" ${settings.overtime ? '' : 'disabled'}></label>
     </div>
-    <p class="footnote">Auf dem Wochenzettel: Überstunden = Stunden Gesamt − Soll, weniger als das Soll zählt als 0. Das Überstunden-Konto in der Übersicht rechnet monatlich Tag für Tag und verrechnet Plus- und Minusstunden. „Konto ab“ leer lassen = ab dem ersten Stundenzettel.</p>
+    <p class="footnote">Auf dem Wochenzettel: Überstunden = Stunden Gesamt − Soll, weniger als das Soll zählt als 0. Das Überstunden-Konto in der Übersicht rechnet monatlich Tag für Tag und verrechnet Plus- und Minusstunden. Tage ohne Stundenzettel zählen nicht mit.</p>
 
     <h2 class="section-title">Krankheit, Urlaub, Feiertage</h2>
     <div class="card form">
@@ -1151,7 +1137,7 @@ document.addEventListener('input', (e) => {
     const key = t.dataset.s;
     if (key === 'overtime') {
       settings.overtime = t.checked;
-      ['target-field', 'start-field'].forEach((fid) => {
+      ['target-field'].forEach((fid) => {
         const field = document.getElementById(fid);
         field.classList.toggle('disabled', !t.checked);
         field.querySelector('input').disabled = !t.checked;
