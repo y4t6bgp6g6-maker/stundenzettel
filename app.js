@@ -23,6 +23,11 @@ const fmtShort = (d) => `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${String(d
 const fmtDayMonth = (d) => `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.`;
 /** Minuten als Dezimalstunden: 90 → 1,50 */
 const fmtDec = (minutes) => (minutes / 60).toFixed(2).replace('.', ',');
+/** Stunden im eingestellten Format: „8,00“ oder „8h 0m“ (für PDF, ohne Einheit) */
+const fmtHours = (minutes) =>
+  settings.hourFormat === 'hm' ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : fmtDec(minutes);
+/** Wie fmtHours, mit Einheit für die App: „8,00 h“ oder „8h 0m“ */
+const fmtH = (minutes) => (settings.hourFormat === 'hm' ? fmtHours(minutes) : `${fmtDec(minutes)} h`);
 /** Minuten seit Mitternacht: 480 → 08:00 */
 const fmtTime = (m) => `${pad(Math.floor(m / 60) % 24)}:${pad(m % 60)}`;
 
@@ -59,7 +64,6 @@ const dayWorked = (d) => d.rows.reduce((s, r) => s + (rowMinutes(r) || 0), 0);
 /** Gutgeschriebene Minuten für Krankheit, Urlaub usw. laut Einstellungen */
 const statusCredit = (status) => (settings.credit[status] ? Math.round(settings.hoursPerDay * 60) : 0);
 const dayTotal = (d) => (d.status ? statusCredit(d.status) : Math.max(0, dayWorked(d) - d.pause));
-const dayIsEmpty = (d) => !d.status && d.pause === 0 && d.rows.every(rowIsEmpty);
 const dayHasTimes = (d) => d.rows.some((r) => r.start != null || r.end != null);
 /** Mindestanzahl Zeilen im PDF: Mo–Fr 5, Sa/So 1 */
 const pdfMinRows = (i) => (i < 5 ? 5 : 1);
@@ -104,6 +108,8 @@ const DEFAULT_SETTINGS = {
   overtime: true,
   target: 40,
   hoursPerDay: 8,
+  minuteStep: 15,
+  hourFormat: 'dec',
   credit: { krank: true, urlaub: true, feiertag: true, frei: false },
 };
 
@@ -261,8 +267,8 @@ function renderList() {
       <span class="nav-title"></span>
       <span class="nav-btn"></span>
     </header>
-    <h1 class="large-title">Stundenzettel</h1>
     ${keys.length ? statsCardHTML() : ''}
+    <h1 class="large-title">Stundenzettel</h1>
     ${content}
     <div class="bottom-bar"><button class="primary" data-act="new">${ICON.plus} Neuer Stundenzettel</button></div>`;
 }
@@ -314,7 +320,7 @@ function listRowHTML(s) {
           <span class="list-title">${fmtShort(sheetFirstDate(s))} – ${fmtShort(sheetLastDate(s))}</span>
           <span class="list-sub">KW ${isoWeek(parseDate(s.weekStart))} · ${sent ? 'gesendet' : 'offen'}</span>
         </span>
-        <span class="list-hours">${fmtDec(sheetTotal(s))} h</span>
+        <span class="list-hours">${fmtH(sheetTotal(s))}</span>
         <span class="list-chevron">${ICON.chevronRight}</span>
       </a>
       <button class="swipe-del" data-act="delete" data-id="${s.id}">Löschen</button>
@@ -363,11 +369,9 @@ function dayHTML(s, i) {
       <div class="inactive-note">gehört zum ${MONTHS[date.getMonth()]}</div>
     </section>`;
   }
-  const canCopy = i > 0 && sheetIsActive(s, i - 1);
   const head = `<div class="day-head">
       <div><b>${WEEKDAYS[i]}</b> <span class="muted">${fmtDayMonth(date)}</span></div>
       <div class="day-actions">
-        ${canCopy ? `<button class="chip-btn" data-act="copy">Wie Vortag</button>` : ''}
         <button class="chip-btn status-btn ${day.status ? 'set status-' + day.status : ''}" data-act="status">${day.status ? DAY_STATUS_SHORT[day.status] : 'Arbeit'} ▾</button>
       </div>
     </div>`;
@@ -377,9 +381,9 @@ function dayHTML(s, i) {
       ${head}
       <div class="status-body">
         <b>${DAY_STATUS[day.status]}</b>
-        <span class="muted">${credit ? `${fmtDec(credit)} h gutgeschrieben` : 'keine Stunden gutgeschrieben'}</span>
+        <span class="muted">${credit ? `${fmtH(credit)} gutgeschrieben` : 'keine Stunden gutgeschrieben'}</span>
       </div>
-      <div class="day-foot"><span class="day-total">Gesamt <b>${fmtDec(credit)}</b> h</span></div>
+      <div class="day-foot"><span class="day-total">Gesamt <b>${fmtH(credit)}</b></span></div>
     </section>`;
   }
   return `<section class="day" data-day="${i}">
@@ -387,8 +391,8 @@ function dayHTML(s, i) {
     ${day.rows.map((r) => rowHTML(r, day.rows.length)).join('')}
     <div class="day-foot">
       <button class="link-btn" data-act="addrow">${ICON.plus} Zeile</button>
-      <button class="pill" data-act="pause">Pause ${fmtDec(day.pause)} h</button>
-      <span class="day-total">Gesamt <b>${fmtDec(dayTotal(day))}</b> h</span>
+      <button class="pill" data-act="pause">Pause ${fmtH(day.pause)}</button>
+      <span class="day-total">Gesamt <b>${fmtH(dayTotal(day))}</b></span>
     </div>
   </section>`;
 }
@@ -421,7 +425,7 @@ function rowHTML(r, rowCount) {
       ${timeBtn('start', 'Beginn')}
       <span class="arrow">–</span>
       ${timeBtn('end', 'Ende')}
-      <span class="row-hours">${m == null ? '' : fmtDec(m) + ' h'}</span>
+      <span class="row-hours">${m == null ? '' : fmtH(m)}</span>
       ${rowCount > 1 ? `<button class="row-del" data-act="delrow" aria-label="Zeile löschen">${ICON.close}</button>` : '<span class="row-del-space"></span>'}
     </div>
     <div class="suggest-wrap"><input class="txt" data-f="site" placeholder="Baustelle" value="${escapeHtml(r.site)}" autocomplete="off" autocapitalize="sentences" enterkeyhint="next"><div class="chips"></div></div>
@@ -430,9 +434,9 @@ function rowHTML(r, rowCount) {
 }
 
 function summaryHTML(s) {
-  let html = `<div class="sum-row"><span>Stunden Gesamt</span><b>${fmtDec(sheetTotal(s))} h</b></div>`;
+  let html = `<div class="sum-row"><span>Stunden Gesamt</span><b>${fmtH(sheetTotal(s))}</b></div>`;
   if (settings.overtime) {
-    html += `<div class="sum-row"><span>Überstunden <span class="muted">(Soll ${fmtDec(Math.round(settings.target * 60))} h)</span></span><b>${fmtDec(sheetOvertime(s, settings.target))} h</b></div>`;
+    html += `<div class="sum-row"><span>Überstunden <span class="muted">(Soll ${fmtH(Math.round(settings.target * 60))})</span></span><b>${fmtH(sheetOvertime(s, settings.target))}</b></div>`;
   }
   return html;
 }
@@ -493,33 +497,13 @@ function editTime(btn) {
 
 function editPause(btn) {
   const { dayIndex, day } = rowContext(btn);
-  const values = Array.from({ length: 17 }, (_, i) => i * 15);
-  wheelPicker('Pause', [{ values, label: (v) => `${fmtDec(v)} h` }], [day.pause], ([v]) => {
+  const step = settings.minuteStep;
+  const values = Array.from({ length: 240 / step + 1 }, (_, i) => i * step);
+  wheelPicker('Pause', [{ values, label: (v) => `${fmtH(v)}` }], [day.pause], ([v]) => {
     day.pause = v;
     saveSheets();
     refreshDay(dayIndex);
   });
-}
-
-function copyPreviousDay(btn) {
-  const { s, dayIndex, day } = rowContext(btn);
-  const prev = s.days[dayIndex - 1];
-  const apply = () => {
-    day.pause = prev.pause;
-    day.rows = prev.rows.map((r) => ({ ...r, id: uid() }));
-    if (prev.status) day.status = prev.status;
-    else delete day.status;
-    saveSheets();
-    refreshDay(dayIndex);
-    toast(`${WEEKDAYS[dayIndex - 1]} übernommen`);
-  };
-  if (dayIsEmpty(prev)) {
-    toast(`${WEEKDAYS[dayIndex - 1]} ist noch leer`);
-  } else if (dayIsEmpty(day)) {
-    apply();
-  } else {
-    confirmDialog(`${WEEKDAYS[dayIndex]} überschreiben?`, `Die Einträge von ${WEEKDAYS[dayIndex]} werden durch die von ${WEEKDAYS[dayIndex - 1]} ersetzt.`, 'Überschreiben', apply, true);
-  }
 }
 
 function changeWeek() {
@@ -626,6 +610,21 @@ function renderSettings() {
       <label class="field"><span>Name</span><input data-s="name" placeholder="Vor- und Nachname" value="${escapeHtml(settings.name)}" autocomplete="name" enterkeyhint="done"></label>
     </div>
     <p class="footnote">Wird auf jeden neuen Stundenzettel eingetragen.</p>
+
+    <h2 class="section-title">Eingabe &amp; Anzeige</h2>
+    <div class="card form">
+      <label class="field"><span>Zeitschritte</span>
+        <select data-s="minuteStep">
+          <option value="15" ${settings.minuteStep === 15 ? 'selected' : ''}>15 Minuten</option>
+          <option value="30" ${settings.minuteStep === 30 ? 'selected' : ''}>30 Minuten</option>
+        </select></label>
+      <label class="field"><span>Stundenformat</span>
+        <select data-s="hourFormat">
+          <option value="dec" ${settings.hourFormat !== 'hm' ? 'selected' : ''}>Dezimal (8,50)</option>
+          <option value="hm" ${settings.hourFormat === 'hm' ? 'selected' : ''}>Stunden/Min. (8h 30m)</option>
+        </select></label>
+    </div>
+    <p class="footnote">Die Zeitschritte gelten für Arbeitsbeginn, Arbeitsende und Pause. Das Stundenformat gilt für Stunden, Pause und Summen in der App und im PDF.</p>
 
     <h2 class="section-title">Überstunden</h2>
     <div class="card form">
@@ -783,14 +782,15 @@ function wheelPicker(title, columns, initial, onDone, extraHTML = '', onExtra = 
 
 function timePicker(title, initial, hasValue, onDone) {
   const hours = Array.from({ length: 24 }, (_, i) => i);
-  const quarters = [0, 15, 30, 45];
+  const step = settings.minuteStep;
+  const minutes = Array.from({ length: 60 / step }, (_, i) => i * step);
   wheelPicker(
     title,
     [
       { values: hours, label: pad },
-      { values: quarters, label: pad, sep: ':' },
+      { values: minutes, label: pad, sep: ':' },
     ],
-    [Math.floor(initial / 60), Math.floor((initial % 60) / 15) * 15],
+    [Math.floor(initial / 60), Math.floor((initial % 60) / step) * step],
     ([h, m]) => onDone(h * 60 + m),
     hasValue ? `<button class="modal-wide destructive" data-m="extra">Zeit löschen</button>` : '',
     () => onDone(null)
@@ -962,9 +962,6 @@ document.addEventListener('click', (e) => {
     case 'status':
       chooseStatus(el);
       break;
-    case 'copy':
-      copyPreviousDay(el);
-      break;
     case 'addrow': {
       const { dayIndex, day } = rowContext(el);
       // Neue Zeile beginnt dort, wo die vorherige geendet hat
@@ -1028,6 +1025,8 @@ document.addEventListener('input', (e) => {
     } else if (key === 'target' || key === 'hoursPerDay') {
       const v = parseFloat(t.value.replace(',', '.'));
       if (!Number.isNaN(v) && v >= 0) settings[key] = v;
+    } else if (key === 'minuteStep') {
+      settings.minuteStep = Number(t.value);
     } else if (key.startsWith('credit.')) {
       settings.credit[key.slice(7)] = t.checked;
     } else {

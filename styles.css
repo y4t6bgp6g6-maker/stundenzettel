@@ -514,3 +514,17 @@ input { font: inherit; color: inherit; }
 .stats-label { font-size: 13px; color: var(--muted); }
 .day-head > div:first-child { white-space: nowrap; }
 .day-actions { flex-wrap: nowrap; }
+.field select {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  text-align: right;
+  text-align-last: right;
+  padding: 12px 0;
+  min-width: 0;
+  flex: 1;
+}
+.stats-card { margin-top: 4px; }

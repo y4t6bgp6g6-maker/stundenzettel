@@ -64,6 +64,16 @@ class PdfDoc {
     const tx = align === 'right' ? x + w - tw : align === 'center' ? x + (w - tw) / 2 : x;
     this.text(t, tx, y + h / 2 + s * 0.35, s, bold, gray);
   }
+  // Großer, fetter, zentrierter Text; mehrere Wörter werden bei Bedarf auf eigene Zeilen verteilt.
+  labelBox(str, x, y, w, h, size) {
+    const oneLine = measureText(str, size, true) <= w;
+    const lines = oneLine ? [str] : str.split(/\s+/);
+    let s = size;
+    while (s > 6 && (lines.some((l) => measureText(l, s, true) > w) || lines.length * s * 1.2 > h)) s -= 0.5;
+    const lineH = s * 1.2;
+    const top = y + (h - lines.length * lineH) / 2;
+    lines.forEach((l, i) => this.textBox(l, x, top + i * lineH, w, lineH, s, true, 'center'));
+  }
   // Wie textBox, aber zu langer Text wird zuerst auf zwei Zeilen umbrochen, bevor er schrumpft.
   wrapBox(str, x, y, w, h, size, gray = 0) {
     const t = String(str ?? '').trim();
@@ -190,7 +200,7 @@ function buildTimesheetPdf(sheet, overtimeTarget) {
     for (let r = 1; r < n; r++) {
       const ly = y + r * rowH;
       for (const { c } of textCols) {
-        if (status && c === 6) continue; // Spalte „Art der Arbeit“ bleibt für den Text frei
+        if (status && c === 5) continue; // Spalte „Baustelle“ bleibt für den Text frei
         doc.line(xs[c], ly, xs[c + 1], ly, 0.4, 0.78);
       }
     }
@@ -198,8 +208,8 @@ function buildTimesheetPdf(sheet, overtimeTarget) {
     doc.textBox(WEEKDAYS[i], xs[0] + 3, y, xs[1] - xs[0] - 6, rowH, fs, true, 'left', active ? BLACK : GREY_TEXT);
 
     if (status) {
-      doc.textBox(DAY_STATUS[status], xs[6] + 6, y, xs[7] - xs[6] - 12, h, Math.min(14, Math.max(fs + 3, h * 0.3)), true, 'center');
-      doc.textBox(fmtDec(dayTotal(day)), xs[7] + 3, y, xs[8] - xs[7] - 6, rowH, fs, false, 'right');
+      doc.labelBox(DAY_STATUS[status], xs[5] + 4, y, xs[6] - xs[5] - 8, h, Math.min(14, Math.max(fs + 3, h * 0.3)));
+      doc.textBox(fmtHours(dayTotal(day)), xs[7] + 3, y, xs[8] - xs[7] - 6, rowH, fs, false, 'right');
     } else if (active) {
       day.rows.forEach((row, r) => {
         const ry = y + r * rowH;
@@ -207,13 +217,13 @@ function buildTimesheetPdf(sheet, overtimeTarget) {
         if (row.start != null) cell(1, fmtTime(row.start), 'right');
         if (row.end != null) cell(2, fmtTime(row.end), 'right');
         const m = rowMinutes(row);
-        if (m != null) cell(3, fmtDec(m), 'right');
+        if (m != null) cell(3, fmtHours(m), 'right');
         doc.wrapBox(row.site, xs[5] + 3, ry, xs[6] - xs[5] - 6, rowH, fs);
         doc.wrapBox(row.work, xs[6] + 3, ry, xs[7] - xs[6] - 6, rowH, fs);
       });
       const first = (c, text) => doc.textBox(text, xs[c] + 3, y, xs[c + 1] - xs[c] - 6, rowH, fs, false, 'right');
-      if (day.pause > 0 || dayHasTimes(day)) first(4, fmtDec(day.pause));
-      first(7, fmtDec(dayTotal(day)));
+      if (day.pause > 0 || dayHasTimes(day)) first(4, fmtHours(day.pause));
+      first(7, fmtHours(dayTotal(day)));
     }
     y += h;
   });
@@ -229,11 +239,11 @@ function buildTimesheetPdf(sheet, overtimeTarget) {
   // Summen
   let fy = tableBottom + 8;
   doc.textBox('Stunden Gesamt:', xs[5], fy, xs[7] - xs[5] - 6, 14, 10, true, 'right');
-  doc.textBox(fmtDec(sheetTotal(sheet)), xs[7] + 3, fy, xs[8] - xs[7] - 6, 14, 10, true, 'right');
+  doc.textBox(fmtHours(sheetTotal(sheet)), xs[7] + 3, fy, xs[8] - xs[7] - 6, 14, 10, true, 'right');
   if (overtimeTarget != null) {
     fy += 18;
     doc.textBox('Überstunden:', xs[5], fy, xs[7] - xs[5] - 6, 14, 10, true, 'right');
-    doc.textBox(fmtDec(sheetOvertime(sheet, overtimeTarget)), xs[7] + 3, fy, xs[8] - xs[7] - 6, 14, 10, true, 'right');
+    doc.textBox(fmtHours(sheetOvertime(sheet, overtimeTarget)), xs[7] + 3, fy, xs[8] - xs[7] - 6, 14, 10, true, 'right');
   }
 
   return doc.output({ title: sheetTitle(sheet), author: sheet.name });
