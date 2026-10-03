@@ -156,33 +156,29 @@ function accountStartDate() {
 }
 
 /**
- * Überstunden-Konto je Monat: Ist − Soll, Tag für Tag.
- * Soll: jeder Werktag Mo–Fr mit Wochen-Soll ÷ 5; im laufenden Monat nur bis einschließlich heute.
- * Ist: „Stunden Gesamt“ jedes Tages (inkl. gutgeschriebener Stunden für Urlaub, Krankheit, Feiertag).
+ * Überstunden-Konto je Monat: Ist − Soll, Tag für Tag – nur Tage, für die es einen Stundenzettel gibt.
+ * Wochen ohne Zettel kommen in der Rechnung nicht vor.
+ * Soll: jeder Werktag Mo–Fr mit Wochen-Soll ÷ 5; Tage nach heute zählen noch nicht.
+ * Ist: „Stunden Gesamt“ des Tages (inkl. gutgeschriebener Stunden für Urlaub, Krankheit, Feiertag).
  * Ergebnis: Map Jahr → Map Monat (1–12) → Saldo in Minuten
  */
 function overtimeAccount() {
   const result = new Map();
   const start = accountStartDate();
   if (!start) return result;
-  const ist = new Map();
-  for (const s of sheets) {
-    s.days.forEach((d, i) => {
-      if (!sheetIsActive(s, i)) return;
-      const key = isoDate(sheetDate(s, i));
-      ist.set(key, (ist.get(key) || 0) + dayTotal(d));
-    });
-  }
   const dailySoll = Math.round((settings.target * 60) / 5);
   const today = startOfDay(new Date());
-  for (let d = startOfDay(start); d <= today; d = addDays(d, 1)) {
-    const wd = d.getDay();
-    const soll = wd >= 1 && wd <= 5 ? dailySoll : 0;
-    const y = d.getFullYear();
-    const m = d.getMonth() + 1;
-    if (!result.has(y)) result.set(y, new Map());
-    const months = result.get(y);
-    months.set(m, (months.get(m) || 0) + (ist.get(isoDate(d)) || 0) - soll);
+  for (const s of sheets) {
+    s.days.forEach((d, i) => {
+      const date = sheetDate(s, i);
+      if (!sheetIsActive(s, i) || date < start || date > today) return;
+      const soll = i < 5 ? dailySoll : 0;
+      const y = date.getFullYear();
+      const m = date.getMonth() + 1;
+      if (!result.has(y)) result.set(y, new Map());
+      const months = result.get(y);
+      months.set(m, (months.get(m) || 0) + dayTotal(d) - soll);
+    });
   }
   return result;
 }
@@ -222,6 +218,8 @@ function sheetProblems(s) {
       const b = timed[k];
       if (b.start < a.end) {
         problems.push(`${day}: ${fmtTime(a.start)}–${fmtTime(a.end)} und ${fmtTime(b.start)}–${fmtTime(b.end)} überschneiden sich`);
+      } else if (b.start > a.end) {
+        problems.push(`${day}: Lücke von ${fmtTime(a.end)} bis ${fmtTime(b.start)}`);
       }
     }
     if (i < 5 && !dayHasTimes(d)) problems.push(`${day}: kein Eintrag`);
@@ -405,7 +403,7 @@ function renderStats() {
       })
       .join('')}
     <p class="footnote">Urlaubs- und Krankheitstage: alle so markierten Tage auf deinen Stundenzetteln.</p>
-    ${settings.overtime && accountStartDate() ? `<p class="footnote">Überstunden je Monat: Stunden Gesamt aller Tage minus Soll (${fmtH(Math.round((settings.target * 60) / 5))} je Werktag Mo–Fr). Im laufenden Monat zählt das Soll bis heute. Plus- und Minusstunden werden verrechnet. Konto ab ${fmtShort(accountStartDate())}.</p>` : ''}`;
+    ${settings.overtime && accountStartDate() ? `<p class="footnote">Überstunden je Monat: Stunden Gesamt aller Tage minus Soll (${fmtH(Math.round((settings.target * 60) / 5))} je Werktag Mo–Fr). Gezählt werden nur Tage mit Stundenzettel bis heute; Wochen ohne Zettel bleiben außen vor. Plus- und Minusstunden werden verrechnet. Konto ab ${fmtShort(accountStartDate())}.</p>` : ''}`;
 }
 
 function overtimeYearHTML(year, months) {
