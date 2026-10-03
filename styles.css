@@ -528,3 +528,16 @@ input { font: inherit; color: inherit; }
   flex: 1;
 }
 .stats-card { margin-top: 4px; }
+
+/* Warnsymbol bei fehlender Baustelle / Art der Arbeit */
+.suggest-wrap .warn {
+  display: none;
+  position: absolute;
+  right: 4px;
+  top: 6px;
+  font-size: 16px;
+  line-height: 24px;
+  pointer-events: none;
+}
+.suggest-wrap.missing .warn { display: block; }
+.suggest-wrap.missing .txt { padding-right: 30px; }

@@ -413,6 +413,9 @@ function chooseStatus(btn) {
   ]);
 }
 
+/** Zeit eingetragen, aber Baustelle bzw. Art der Arbeit noch leer → Warnsymbol */
+const fieldMissing = (r, field) => (r.start != null || r.end != null) && !String(r[field] || '').trim();
+
 function rowHTML(r, rowCount) {
   const m = rowMinutes(r);
   const timeBtn = (which, label) => {
@@ -427,8 +430,8 @@ function rowHTML(r, rowCount) {
       <span class="row-hours">${m == null ? '' : fmtH(m)}</span>
       ${rowCount > 1 ? `<button class="row-del" data-act="delrow" aria-label="Zeile löschen">${ICON.close}</button>` : '<span class="row-del-space"></span>'}
     </div>
-    <div class="suggest-wrap"><input class="txt" data-f="site" placeholder="Baustelle" value="${escapeHtml(r.site)}" autocomplete="off" autocapitalize="sentences" enterkeyhint="next"><div class="chips"></div></div>
-    <div class="suggest-wrap"><input class="txt" data-f="work" placeholder="Art der Arbeit" value="${escapeHtml(r.work)}" autocomplete="off" autocapitalize="sentences" enterkeyhint="done"><div class="chips"></div></div>
+    <div class="suggest-wrap ${fieldMissing(r, 'site') ? 'missing' : ''}"><span class="warn" aria-label="fehlt">⚠️</span><input class="txt" data-f="site" placeholder="Baustelle" value="${escapeHtml(r.site)}" autocomplete="off" autocapitalize="sentences" enterkeyhint="next"><div class="chips"></div></div>
+    <div class="suggest-wrap ${fieldMissing(r, 'work') ? 'missing' : ''}"><span class="warn" aria-label="fehlt">⚠️</span><input class="txt" data-f="work" placeholder="Art der Arbeit" value="${escapeHtml(r.work)}" autocomplete="off" autocapitalize="sentences" enterkeyhint="done"><div class="chips"></div></div>
   </div>`;
 }
 
@@ -1008,7 +1011,10 @@ document.addEventListener('input', (e) => {
       s.name = t.value;
     } else {
       const { row } = rowContext(t);
-      if (row) row[t.dataset.f] = t.value;
+      if (row) {
+        row[t.dataset.f] = t.value;
+        t.closest('.suggest-wrap').classList.toggle('missing', fieldMissing(row, t.dataset.f));
+      }
       showChips(t);
     }
     saveSheets();
