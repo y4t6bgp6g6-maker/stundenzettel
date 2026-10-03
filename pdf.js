@@ -32,6 +32,7 @@ function pdfString(str) {
 }
 
 const num = (v) => (Math.round(v * 100) / 100).toString();
+const colorOp = (c, op) => (Array.isArray(c) ? `${num(c[0])} ${num(c[1])} ${num(c[2])} ${op === 'g' ? 'rg' : 'RG'}` : `${num(c)} ${op}`);
 
 class PdfDoc {
   constructor() {
@@ -44,8 +45,49 @@ class PdfDoc {
   line(x1, y1, x2, y2, width, gray) {
     this.ops.push(`${num(gray)} G ${num(width)} w ${num(x1)} ${num(PDF_H - y1)} m ${num(x2)} ${num(PDF_H - y2)} l S`);
   }
-  text(str, x, baseline, size, bold, gray = 0) {
-    this.ops.push(`BT /${bold ? 'F2' : 'F1'} ${num(size)} Tf ${num(gray)} g ${num(x)} ${num(PDF_H - baseline)} Td (${pdfString(str)}) Tj ET`);
+  // color: Grauwert 0–1 oder [r, g, b]
+  text(str, x, baseline, size, bold, color = 0) {
+    this.ops.push(`BT /${bold ? 'F2' : 'F1'} ${num(size)} Tf ${colorOp(color, 'g')} ${num(x)} ${num(PDF_H - baseline)} Td (${pdfString(str)}) Tj ET`);
+  }
+
+  // ── Vektorgrafik (für den Rahmen) ──
+  fillColor(c) { this.ops.push(colorOp(c, 'g')); }
+  strokeColor(c) { this.ops.push(colorOp(c, 'G')); }
+  lineWidth(w) { this.ops.push(`${num(w)} w 1 J 1 j`); }
+  moveTo(x, y) { this.ops.push(`${num(x)} ${num(PDF_H - y)} m`); }
+  lineTo(x, y) { this.ops.push(`${num(x)} ${num(PDF_H - y)} l`); }
+  curveTo(x1, y1, x2, y2, x3, y3) {
+    this.ops.push(`${num(x1)} ${num(PDF_H - y1)} ${num(x2)} ${num(PDF_H - y2)} ${num(x3)} ${num(PDF_H - y3)} c`);
+  }
+  closePath() { this.ops.push('h'); }
+  doFill() { this.ops.push('f'); }
+  doStroke() { this.ops.push('S'); }
+  doFillStroke() { this.ops.push('B'); }
+  roundRectPath(x, y, w, h, r) {
+    const k = 0.5523 * r;
+    this.moveTo(x + r, y);
+    this.lineTo(x + w - r, y);
+    this.curveTo(x + w - r + k, y, x + w, y + r - k, x + w, y + r);
+    this.lineTo(x + w, y + h - r);
+    this.curveTo(x + w, y + h - r + k, x + w - r + k, y + h, x + w - r, y + h);
+    this.lineTo(x + r, y + h);
+    this.curveTo(x + r - k, y + h, x, y + h - r + k, x, y + h - r);
+    this.lineTo(x, y + r);
+    this.curveTo(x, y + r - k, x + r - k, y, x + r, y);
+    this.closePath();
+  }
+  // Ellipse, optional um angle (Grad) gedreht
+  ellipsePath(cx, cy, rx, ry, angle = 0) {
+    const k = 0.5523;
+    const a = (angle * Math.PI) / 180;
+    const P = (x, y) => [cx + x * Math.cos(a) - y * Math.sin(a), cy + x * Math.sin(a) + y * Math.cos(a)];
+    const pts = [
+      [rx, 0], [rx, k * ry], [k * rx, ry], [0, ry], [-k * rx, ry], [-rx, k * ry], [-rx, 0],
+      [-rx, -k * ry], [-k * rx, -ry], [0, -ry], [k * rx, -ry], [rx, -k * ry], [rx, 0],
+    ].map(([x, y]) => P(x, y));
+    this.moveTo(...pts[0]);
+    for (let i = 1; i < pts.length; i += 3) this.curveTo(...pts[i], ...pts[i + 1], ...pts[i + 2]);
+    this.closePath();
   }
   // Einzeiliger Text in einer Box: wird bei Bedarf verkleinert und notfalls gekürzt.
   textBox(str, x, y, w, h, size, bold, align = 'left', gray = 0) {
@@ -133,10 +175,15 @@ class PdfDoc {
  * @param sheet Stundenzettel
  * @param overtimeTarget Soll-Stunden pro Woche oder null, wenn Überstunden ausgeschaltet sind
  */
-function buildTimesheetPdf(sheet, overtimeTarget) {
+function buildTimesheetPdf(sheet, overtimeTarget, frame = settings.pdfFrame) {
   const doc = new PdfDoc();
-  const left = 36;
-  const right = PDF_W - 36;
+  // Mit Rahmen: alles im freien Innenbereich, unten rechts sitzt der Yeti, unten links die Flasche
+  const L = frame
+    ? { left: 46, right: PDF_W - 46, nameY: 56, weekY: 76, tableTop: 102, tableBottom: 680 }
+    : { left: 36, right: PDF_W - 36, nameY: 70, weekY: 92, tableTop: 118, tableBottom: null };
+  if (frame) drawFrame(doc);
+  const left = L.left;
+  const right = L.right;
   const width = right - left;
   const fractions = [0.105, 0.09, 0.09, 0.075, 0.07, 0.19, 0.275, 0.105];
   const xs = [left];
@@ -146,21 +193,21 @@ function buildTimesheetPdf(sheet, overtimeTarget) {
   const BLACK = 0;
   const GREY_TEXT = 0.55;
 
-  // Kopf
-  doc.textBox('Stundenzettel', left, 38, width, 22, 16, true, 'center');
+  // Kopf (mit Rahmen steht der Titel im Banner des Rahmens)
+  if (!frame) doc.textBox('Stundenzettel', left, 38, width, 22, 16, true, 'center');
   const valueX = left + 95;
-  doc.textBox('Name:', left, 70, 90, 14, 10, true);
-  doc.textBox(sheet.name, valueX, 70, right - valueX, 14, 10, true);
-  doc.textBox('Woche von:', left, 92, 90, 14, 10, true);
-  doc.textBox(fmtShort(sheetFirstDate(sheet)), valueX, 92, 80, 14, 10, true);
-  doc.textBox('Bis:', valueX + 95, 92, 30, 14, 10, true);
-  doc.textBox(fmtShort(sheetLastDate(sheet)), valueX + 130, 92, 80, 14, 10, true);
+  doc.textBox('Name:', left, L.nameY, 90, 14, 10, true);
+  doc.textBox(sheet.name, valueX, L.nameY, (frame ? 300 : right) - valueX, 14, 10, true);
+  doc.textBox('Woche von:', left, L.weekY, 90, 14, 10, true);
+  doc.textBox(fmtShort(sheetFirstDate(sheet)), valueX, L.weekY, 80, 14, 10, true);
+  doc.textBox('Bis:', valueX + 95, L.weekY, 30, 14, 10, true);
+  doc.textBox(fmtShort(sheetLastDate(sheet)), valueX + 130, L.weekY, 80, 14, 10, true);
 
   // Größen so wählen, dass die Tabelle die Seite füllt
-  const tableTop = 118;
+  const tableTop = L.tableTop;
   const headerH = 26;
   const footerH = overtimeTarget == null ? 28 : 46;
-  const bottom = PDF_H - 36 - footerH;
+  const bottom = L.tableBottom ?? PDF_H - 36 - footerH;
   // Mo–Fr mindestens 5 Zeilen, Sa/So mindestens 1; Krankheit/Urlaub usw. nur die Mindestzeilen
   const rowsOnPdf = (d, i) => (d.status ? pdfMinRows(i) : Math.max(d.rows.length, pdfMinRows(i)));
   const rowCount = sheet.days.reduce((n, d, i) => n + rowsOnPdf(d, i), 0);
@@ -236,14 +283,16 @@ function buildTimesheetPdf(sheet, overtimeTarget) {
   doc.line(left, tableBottom, right, tableBottom, 0.8, BLACK);
   xs.forEach((x) => doc.line(x, tableTop, x, tableBottom, 0.6, BLACK));
 
-  // Summen
+  // Summen (mit Rahmen links neben dem Yeti)
+  const labelBox = frame ? [left + 150, 150] : [xs[5], xs[7] - xs[5] - 6];
+  const valueBox = frame ? [left + 306, 70] : [xs[7] + 3, xs[8] - xs[7] - 6];
   let fy = tableBottom + 8;
-  doc.textBox('Stunden Gesamt:', xs[5], fy, xs[7] - xs[5] - 6, 14, 10, true, 'right');
-  doc.textBox(fmtHours(sheetTotal(sheet)), xs[7] + 3, fy, xs[8] - xs[7] - 6, 14, 10, true, 'right');
+  doc.textBox('Stunden Gesamt:', labelBox[0], fy, labelBox[1], 14, 10, true, 'right');
+  doc.textBox(fmtHours(sheetTotal(sheet)), valueBox[0], fy, valueBox[1], 14, 10, true, 'right');
   if (overtimeTarget != null) {
     fy += 18;
-    doc.textBox('Überstunden:', xs[5], fy, xs[7] - xs[5] - 6, 14, 10, true, 'right');
-    doc.textBox(fmtHours(sheetOvertime(sheet, overtimeTarget)), xs[7] + 3, fy, xs[8] - xs[7] - 6, 14, 10, true, 'right');
+    doc.textBox('Überstunden:', labelBox[0], fy, labelBox[1], 14, 10, true, 'right');
+    doc.textBox(fmtHours(sheetOvertime(sheet, overtimeTarget)), valueBox[0], fy, valueBox[1], 14, 10, true, 'right');
   }
 
   return doc.output({ title: sheetTitle(sheet), author: sheet.name });

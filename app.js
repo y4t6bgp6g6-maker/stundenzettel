@@ -110,6 +110,7 @@ const DEFAULT_SETTINGS = {
   hoursPerDay: 8,
   minuteStep: 15,
   hourFormat: 'dec',
+  pdfFrame: false,
   credit: { krank: true, urlaub: true, feiertag: true, frei: false },
 };
 
@@ -628,6 +629,12 @@ function renderSettings() {
     </div>
     <p class="footnote">Die Zeitschritte gelten für Arbeitsbeginn, Arbeitsende und Pause. Das Stundenformat gilt für Stunden, Pause und Summen in der App und im PDF.</p>
 
+    <h2 class="section-title">PDF</h2>
+    <div class="card form">
+      <label class="field toggle-field"><span>Rahmen (Kältetechnik)</span><input type="checkbox" class="toggle" data-s="pdfFrame" ${settings.pdfFrame ? 'checked' : ''}></label>
+    </div>
+    <p class="footnote">Druckt den Stundenzettel in einem Rahmen mit Rohrleitung, Manometer, FSK-Schild und Yeti.</p>
+
     <h2 class="section-title">Überstunden</h2>
     <div class="card form">
       <label class="field toggle-field"><span>Überstunden berechnen</span><input type="checkbox" class="toggle" data-s="overtime" ${settings.overtime ? 'checked' : ''}></label>
@@ -1028,6 +1035,8 @@ document.addEventListener('input', (e) => {
     } else if (key === 'target' || key === 'hoursPerDay') {
       const v = parseFloat(t.value.replace(',', '.'));
       if (!Number.isNaN(v) && v >= 0) settings[key] = v;
+    } else if (key === 'pdfFrame') {
+      settings.pdfFrame = t.checked;
     } else if (key === 'minuteStep') {
       settings.minuteStep = Number(t.value);
     } else if (key.startsWith('credit.')) {
