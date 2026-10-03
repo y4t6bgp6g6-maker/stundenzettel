@@ -151,7 +151,9 @@ function buildTimesheetPdf(sheet, overtimeTarget) {
   const headerH = 26;
   const footerH = overtimeTarget == null ? 28 : 46;
   const bottom = PDF_H - 36 - footerH;
-  const rowCount = sheet.days.reduce((n, d) => n + d.rows.length, 0);
+  // Mo–Fr mindestens 5 Zeilen, Sa/So mindestens 1; Krankheit/Urlaub usw. nur die Mindestzeilen
+  const rowsOnPdf = (d, i) => (d.status ? pdfMinRows(i) : Math.max(d.rows.length, pdfMinRows(i)));
+  const rowCount = sheet.days.reduce((n, d, i) => n + rowsOnPdf(d, i), 0);
   const rowH = Math.min(28, (bottom - tableTop - headerH) / Math.max(rowCount, 1));
   const fs = Math.max(5, Math.min(9.5, rowH * 0.48));
 
@@ -176,9 +178,10 @@ function buildTimesheetPdf(sheet, overtimeTarget) {
   let y = tableTop + headerH;
   const dayTops = [];
   sheet.days.forEach((day, i) => {
-    const n = day.rows.length;
+    const n = rowsOnPdf(day, i);
     const h = n * rowH;
     const active = sheetIsActive(sheet, i);
+    const status = active ? day.status : null;
     dayTops.push(y);
 
     doc.fill(xs[0], y, xs[1] - xs[0], h, 0.87);
@@ -186,12 +189,18 @@ function buildTimesheetPdf(sheet, overtimeTarget) {
 
     for (let r = 1; r < n; r++) {
       const ly = y + r * rowH;
-      for (const { c } of textCols) doc.line(xs[c], ly, xs[c + 1], ly, 0.4, 0.78);
+      for (const { c } of textCols) {
+        if (status && c === 6) continue; // Spalte „Art der Arbeit“ bleibt für den Text frei
+        doc.line(xs[c], ly, xs[c + 1], ly, 0.4, 0.78);
+      }
     }
 
     doc.textBox(WEEKDAYS[i], xs[0] + 3, y, xs[1] - xs[0] - 6, rowH, fs, true, 'left', active ? BLACK : GREY_TEXT);
 
-    if (active) {
+    if (status) {
+      doc.textBox(DAY_STATUS[status], xs[6] + 6, y, xs[7] - xs[6] - 12, h, Math.min(14, Math.max(fs + 3, h * 0.3)), true, 'center');
+      doc.textBox(fmtDec(dayTotal(day)), xs[7] + 3, y, xs[8] - xs[7] - 6, rowH, fs, false, 'right');
+    } else if (active) {
       day.rows.forEach((row, r) => {
         const ry = y + r * rowH;
         const cell = (c, text, align) => doc.textBox(text, xs[c] + 3, ry, xs[c + 1] - xs[c] - 6, rowH, fs, false, align);

@@ -41,15 +41,28 @@ const escapeHtml = (s) =>
 
 // ───────────────────────── Datenmodell ─────────────────────────
 // Zettel: { id, weekStart: 'YYYY-MM-DD' (Montag), year, month, name, days[7], sentAt, createdAt }
-// Tag:    { pause: Minuten, rows: [{ id, start, end, site, work }] }  (start/end: Minuten seit 00:00)
+// Tag:    { pause: Minuten, status?: 'krank'|'urlaub'|'feiertag'|'frei', rows: [{ id, start, end, site, work }] }
+//         (start/end: Minuten seit 00:00; bei gesetztem status werden die Zeilen ignoriert, bleiben aber erhalten)
+
+const DAY_STATUS = {
+  krank: 'Krankheitstag',
+  urlaub: 'Urlaubstag',
+  feiertag: 'Gesetzlicher Feiertag',
+  frei: 'Frei',
+};
+const DAY_STATUS_SHORT = { krank: 'Krank', urlaub: 'Urlaub', feiertag: 'Feiertag', frei: 'Frei' };
 
 const emptyRow = () => ({ id: uid(), start: null, end: null, site: '', work: '' });
 const rowIsEmpty = (r) => r.start == null && r.end == null && !r.site && !r.work;
 const rowMinutes = (r) => (r.start == null || r.end == null ? null : r.end >= r.start ? r.end - r.start : r.end + 1440 - r.start);
 const dayWorked = (d) => d.rows.reduce((s, r) => s + (rowMinutes(r) || 0), 0);
-const dayTotal = (d) => Math.max(0, dayWorked(d) - d.pause);
-const dayIsEmpty = (d) => d.pause === 0 && d.rows.every(rowIsEmpty);
+/** Gutgeschriebene Minuten für Krankheit, Urlaub usw. laut Einstellungen */
+const statusCredit = (status) => (settings.credit[status] ? Math.round(settings.hoursPerDay * 60) : 0);
+const dayTotal = (d) => (d.status ? statusCredit(d.status) : Math.max(0, dayWorked(d) - d.pause));
+const dayIsEmpty = (d) => !d.status && d.pause === 0 && d.rows.every(rowIsEmpty);
 const dayHasTimes = (d) => d.rows.some((r) => r.start != null || r.end != null);
+/** Mindestanzahl Zeilen im PDF: Mo–Fr 5, Sa/So 1 */
+const pdfMinRows = (i) => (i < 5 ? 5 : 1);
 
 /** Neuer Zettel für die Woche des angetippten Tages; dessen Monat bestimmt den Zettel. */
 function newSheet(anchor, name) {
@@ -86,7 +99,13 @@ const sheetMatches = (s, anchor) => {
 
 const STORE_KEY = 'stundenzettel.sheets.v1';
 const SETTINGS_KEY = 'stundenzettel.settings.v1';
-const DEFAULT_SETTINGS = { name: '', overtime: true, target: 40 };
+const DEFAULT_SETTINGS = {
+  name: '',
+  overtime: true,
+  target: 40,
+  hoursPerDay: 8,
+  credit: { krank: true, urlaub: true, feiertag: true, frei: false },
+};
 
 function readJson(key, fallback) {
   try {
@@ -99,7 +118,22 @@ function readJson(key, fallback) {
 
 let sheets = readJson(STORE_KEY, []);
 let settings = { ...DEFAULT_SETTINGS, ...readJson(SETTINGS_KEY, {}) };
+settings.credit = { ...DEFAULT_SETTINGS.credit, ...settings.credit };
 delete settings.recipient; // frühere Einstellung, wird nicht mehr verwendet
+
+/** Urlaubs- und Krankheitstage je Jahr (nach Datum des Tages) */
+function absenceStats() {
+  const years = new Map();
+  for (const s of sheets) {
+    s.days.forEach((d, i) => {
+      if ((d.status !== 'urlaub' && d.status !== 'krank') || !sheetIsActive(s, i)) return;
+      const y = sheetDate(s, i).getFullYear();
+      if (!years.has(y)) years.set(y, { urlaub: 0, krank: 0 });
+      years.get(y)[d.status]++;
+    });
+  }
+  return years;
+}
 
 function saveSheets() {
   try {
@@ -179,6 +213,10 @@ function route() {
     currentView = 'settings';
     renderSettings();
     window.scrollTo(0, 0);
+  } else if (hash === '#/uebersicht') {
+    currentView = 'stats';
+    renderStats();
+    window.scrollTo(0, 0);
   } else {
     currentView = 'list';
     renderList();
@@ -224,8 +262,46 @@ function renderList() {
       <span class="nav-btn"></span>
     </header>
     <h1 class="large-title">Stundenzettel</h1>
+    ${keys.length ? statsCardHTML() : ''}
     ${content}
     <div class="bottom-bar"><button class="primary" data-act="new">${ICON.plus} Neuer Stundenzettel</button></div>`;
+}
+
+const fmtDays = (n) => `${n} ${n === 1 ? 'Tag' : 'Tage'}`;
+
+function statsCardHTML() {
+  const year = new Date().getFullYear();
+  const st = absenceStats().get(year) || { urlaub: 0, krank: 0 };
+  return `<a class="card stats-card" href="#/uebersicht">
+    <span class="stats-year">${year}</span>
+    <span class="stats-item"><span class="stats-num">${st.urlaub}</span><span class="stats-label">${st.urlaub === 1 ? 'Urlaubstag' : 'Urlaubstage'}</span></span>
+    <span class="stats-item"><span class="stats-num">${st.krank}</span><span class="stats-label">${st.krank === 1 ? 'Krankheitstag' : 'Krankheitstage'}</span></span>
+    <span class="list-chevron">${ICON.chevronRight}</span>
+  </a>`;
+}
+
+function renderStats() {
+  const stats = absenceStats();
+  const current = new Date().getFullYear();
+  if (!stats.has(current)) stats.set(current, { urlaub: 0, krank: 0 });
+  const years = [...stats.keys()].sort((a, b) => b - a);
+  app.innerHTML = `
+    <header class="nav">
+      <button class="nav-btn back" data-act="back">${ICON.back}<span>Zettel</span></button>
+      <span class="nav-title">Urlaub &amp; Krankheit</span>
+      <span class="nav-btn"></span>
+    </header>
+    ${years
+      .map((y) => {
+        const st = stats.get(y);
+        return `<h2 class="section-title">${y}${y === current ? ' (laufendes Jahr)' : ''}</h2>
+        <div class="card form">
+          <div class="field"><span>Urlaubstage</span><b>${fmtDays(st.urlaub)}</b></div>
+          <div class="field"><span>Krankheitstage</span><b>${fmtDays(st.krank)}</b></div>
+        </div>`;
+      })
+      .join('')}
+    <p class="footnote">Gezählt werden alle Tage auf deinen Stundenzetteln, die als Urlaubstag bzw. Krankheitstag markiert sind.</p>`;
 }
 
 function listRowHTML(s) {
@@ -288,11 +364,26 @@ function dayHTML(s, i) {
     </section>`;
   }
   const canCopy = i > 0 && sheetIsActive(s, i - 1);
-  return `<section class="day" data-day="${i}">
-    <div class="day-head">
+  const head = `<div class="day-head">
       <div><b>${WEEKDAYS[i]}</b> <span class="muted">${fmtDayMonth(date)}</span></div>
-      ${canCopy ? `<button class="chip-btn" data-act="copy">Wie Vortag</button>` : ''}
-    </div>
+      <div class="day-actions">
+        ${canCopy ? `<button class="chip-btn" data-act="copy">Wie Vortag</button>` : ''}
+        <button class="chip-btn status-btn ${day.status ? 'set status-' + day.status : ''}" data-act="status">${day.status ? DAY_STATUS_SHORT[day.status] : 'Arbeit'} ▾</button>
+      </div>
+    </div>`;
+  if (day.status) {
+    const credit = dayTotal(day);
+    return `<section class="day status-day status-${day.status}" data-day="${i}">
+      ${head}
+      <div class="status-body">
+        <b>${DAY_STATUS[day.status]}</b>
+        <span class="muted">${credit ? `${fmtDec(credit)} h gutgeschrieben` : 'keine Stunden gutgeschrieben'}</span>
+      </div>
+      <div class="day-foot"><span class="day-total">Gesamt <b>${fmtDec(credit)}</b> h</span></div>
+    </section>`;
+  }
+  return `<section class="day" data-day="${i}">
+    ${head}
     ${day.rows.map((r) => rowHTML(r, day.rows.length)).join('')}
     <div class="day-foot">
       <button class="link-btn" data-act="addrow">${ICON.plus} Zeile</button>
@@ -300,6 +391,23 @@ function dayHTML(s, i) {
       <span class="day-total">Gesamt <b>${fmtDec(dayTotal(day))}</b> h</span>
     </div>
   </section>`;
+}
+
+function chooseStatus(btn) {
+  const { dayIndex, day } = rowContext(btn);
+  const set = (status) => {
+    if (status) day.status = status;
+    else delete day.status;
+    saveSheets();
+    refreshDay(dayIndex);
+  };
+  actionSheet([
+    { label: `${day.status ? '' : '✓ '}Arbeitstag`, run: () => set(null) },
+    ...Object.entries(DAY_STATUS).map(([key, label]) => ({
+      label: `${day.status === key ? '✓ ' : ''}${label}`,
+      run: () => set(key),
+    })),
+  ]);
 }
 
 function rowHTML(r, rowCount) {
@@ -399,6 +507,8 @@ function copyPreviousDay(btn) {
   const apply = () => {
     day.pause = prev.pause;
     day.rows = prev.rows.map((r) => ({ ...r, id: uid() }));
+    if (prev.status) day.status = prev.status;
+    else delete day.status;
     saveSheets();
     refreshDay(dayIndex);
     toast(`${WEEKDAYS[dayIndex - 1]} übernommen`);
@@ -523,6 +633,18 @@ function renderSettings() {
       <label class="field ${settings.overtime ? '' : 'disabled'}" id="target-field"><span>Soll pro Woche (h)</span><input data-s="target" type="text" inputmode="decimal" value="${String(settings.target).replace('.', ',')}" ${settings.overtime ? '' : 'disabled'} enterkeyhint="done"></label>
     </div>
     <p class="footnote">Überstunden = Stunden Gesamt − Soll. Weniger Stunden als das Soll werden als 0 angezeigt.</p>
+
+    <h2 class="section-title">Krankheit, Urlaub, Feiertage</h2>
+    <div class="card form">
+      <label class="field"><span>Stunden pro Tag</span><input data-s="hoursPerDay" type="text" inputmode="decimal" value="${String(settings.hoursPerDay).replace('.', ',')}" enterkeyhint="done"></label>
+      ${Object.entries(DAY_STATUS)
+        .map(
+          ([key, label]) =>
+            `<label class="field toggle-field"><span>${label}</span><input type="checkbox" class="toggle" data-s="credit.${key}" ${settings.credit[key] ? 'checked' : ''}></label>`
+        )
+        .join('')}
+    </div>
+    <p class="footnote">Bei eingeschaltetem Schalter werden für diesen Tag die „Stunden pro Tag“ gutgeschrieben und in Stunden Gesamt und Überstunden mitgezählt. Ausgeschaltet zählt der Tag 0 Stunden.</p>
 
     <h2 class="section-title">Datensicherung</h2>
     <div class="card list">
@@ -837,6 +959,9 @@ document.addEventListener('click', (e) => {
     case 'pause':
       editPause(el);
       break;
+    case 'status':
+      chooseStatus(el);
+      break;
     case 'copy':
       copyPreviousDay(el);
       break;
@@ -900,9 +1025,11 @@ document.addEventListener('input', (e) => {
       const field = document.getElementById('target-field');
       field.classList.toggle('disabled', !t.checked);
       field.querySelector('input').disabled = !t.checked;
-    } else if (key === 'target') {
+    } else if (key === 'target' || key === 'hoursPerDay') {
       const v = parseFloat(t.value.replace(',', '.'));
-      if (!Number.isNaN(v) && v >= 0) settings.target = v;
+      if (!Number.isNaN(v) && v >= 0) settings[key] = v;
+    } else if (key.startsWith('credit.')) {
+      settings.credit[key.slice(7)] = t.checked;
     } else {
       settings[key] = t.value;
     }
