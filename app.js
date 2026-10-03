@@ -791,12 +791,26 @@ async function importBackup(input) {
     const data = JSON.parse(await file.text());
     const incoming = Array.isArray(data) ? data : data.sheets;
     if (!Array.isArray(incoming) || !incoming.every((s) => s && s.id && s.weekStart && Array.isArray(s.days))) throw new Error('format');
+    // Gleicher Zettel (ID) wird ersetzt; eine Woche, die es in der App schon gibt, bleibt unverändert.
+    const weekKey = (s) => `${s.weekStart}|${s.year}|${s.month}`;
     const byId = new Map(sheets.map((s) => [s.id, s]));
-    for (const s of incoming) byId.set(s.id, s);
+    const weeks = new Map(sheets.map((s) => [weekKey(s), s.id]));
+    let added = 0;
+    let skipped = 0;
+    for (const s of incoming) {
+      const owner = weeks.get(weekKey(s));
+      if (owner && owner !== s.id) {
+        skipped++;
+        continue;
+      }
+      byId.set(s.id, s);
+      weeks.set(weekKey(s), s.id);
+      added++;
+    }
     sheets = [...byId.values()];
     saveSheets();
     renderSettings();
-    toast(`${incoming.length} Stundenzettel eingelesen`);
+    toast(`${added} Stundenzettel eingelesen${skipped ? `, ${skipped} übersprungen (Woche schon vorhanden)` : ''}`, 4000);
   } catch {
     toast('Diese Datei ist keine gültige Sicherung');
   }
