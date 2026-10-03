@@ -60,7 +60,7 @@ function newSheet(anchor, name) {
     year: a.getFullYear(),
     month: a.getMonth() + 1,
     name,
-    days: WEEKDAYS.map((_, i) => ({ pause: 0, rows: Array.from({ length: i < 5 ? 5 : 1 }, emptyRow) })),
+    days: WEEKDAYS.map(() => ({ pause: 0, rows: [emptyRow()] })),
     sentAt: null,
     createdAt: Date.now(),
   };
@@ -86,7 +86,7 @@ const sheetMatches = (s, anchor) => {
 
 const STORE_KEY = 'stundenzettel.sheets.v1';
 const SETTINGS_KEY = 'stundenzettel.settings.v1';
-const DEFAULT_SETTINGS = { name: '', recipient: '', overtime: true, target: 40 };
+const DEFAULT_SETTINGS = { name: '', overtime: true, target: 40 };
 
 function readJson(key, fallback) {
   try {
@@ -99,6 +99,7 @@ function readJson(key, fallback) {
 
 let sheets = readJson(STORE_KEY, []);
 let settings = { ...DEFAULT_SETTINGS, ...readJson(SETTINGS_KEY, {}) };
+delete settings.recipient; // frühere Einstellung, wird nicht mehr verwendet
 
 function saveSheets() {
   try {
@@ -475,16 +476,17 @@ async function sharePdf(s, isSend) {
     toast('PDF konnte nicht erstellt werden');
     return;
   }
-  const recipient = (settings.recipient || '').trim();
-  if (isSend && recipient && navigator.clipboard) {
-    navigator.clipboard.writeText(recipient).then(
-      () => toast('Empfänger kopiert – in Mail bei „An“ einfügen', 4000),
+  // Eine Web-App kann den Mail-Betreff nicht direkt setzen; der Titel kommt in die Zwischenablage.
+  if (isSend && navigator.clipboard) {
+    navigator.clipboard.writeText(sheetTitle(s)).then(
+      () => toast('Betreff kopiert – in Mail bei „Betreff“ einsetzen', 4000),
       () => {}
     );
   }
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
     try {
-      await navigator.share({ files: [file], title: sheetTitle(s) });
+      // Ohne title/text, damit in der Mail nur der Anhang steht
+      await navigator.share({ files: [file] });
     } catch (e) {
       if (e && e.name === 'AbortError') return;
       downloadFile(file);
@@ -514,12 +516,6 @@ function renderSettings() {
       <label class="field"><span>Name</span><input data-s="name" placeholder="Vor- und Nachname" value="${escapeHtml(settings.name)}" autocomplete="name" enterkeyhint="done"></label>
     </div>
     <p class="footnote">Wird auf jeden neuen Stundenzettel eingetragen.</p>
-
-    <h2 class="section-title">E-Mail</h2>
-    <div class="card form">
-      <label class="field"><span>Empfänger</span><input data-s="recipient" type="email" inputmode="email" placeholder="chef@firma.de" value="${escapeHtml(settings.recipient)}" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done"></label>
-    </div>
-    <p class="footnote">Beim Senden wird die Adresse in die Zwischenablage kopiert. In Mail tippst du ins Feld „An“ und wählst „Einsetzen“. Der Titel des Stundenzettels wird als Betreff mitgegeben.</p>
 
     <h2 class="section-title">Überstunden</h2>
     <div class="card form">
@@ -846,7 +842,11 @@ document.addEventListener('click', (e) => {
       break;
     case 'addrow': {
       const { dayIndex, day } = rowContext(el);
-      day.rows.push(emptyRow());
+      // Neue Zeile beginnt dort, wo die vorherige geendet hat
+      const row = emptyRow();
+      const prev = day.rows.at(-1);
+      if (prev && prev.end != null) row.start = prev.end;
+      day.rows.push(row);
       saveSheets();
       refreshDay(dayIndex);
       break;
