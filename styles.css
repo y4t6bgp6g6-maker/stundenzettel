@@ -545,3 +545,16 @@ input { font: inherit; color: inherit; }
 /* Monatssumme neben dem Monatsnamen */
 .month-head { display: flex; justify-content: space-between; align-items: baseline; }
 .month-total { text-transform: none; font-variant-numeric: tabular-nums; font-weight: 600; color: var(--text); }
+
+/* Überstunden-Konto */
+.plus { color: var(--success); }
+.minus { color: var(--danger); }
+.overtime-card { margin-top: 12px; }
+.year-total { font-weight: 600; }
+.stats-num.plus, .stats-num.minus { font-size: 18px; }
+.field input[type=date] { text-align: right; color: var(--accent); }
+
+/* Hinweise vor dem Senden */
+.alert-msg { font-size: 13px; margin-top: 6px; max-height: 45vh; overflow-y: auto; }
+.problem-list { text-align: left; margin: 4px 0 0; padding-left: 18px; }
+.problem-list li + li { margin-top: 4px; }

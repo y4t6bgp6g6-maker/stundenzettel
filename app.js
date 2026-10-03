@@ -110,6 +110,8 @@ const DEFAULT_SETTINGS = {
   hoursPerDay: 8,
   minuteStep: 15,
   hourFormat: 'dec',
+  state: 'NI',
+  accountStart: '', // leer = ab dem ersten Stundenzettel
   credit: { krank: true, urlaub: true, feiertag: true, frei: false },
 };
 
@@ -142,6 +144,91 @@ function absenceStats() {
   return years;
 }
 
+/** Erster Tag des Überstunden-Kontos: Einstellung oder erster Tag mit Stundenzettel */
+function accountStartDate() {
+  if (settings.accountStart) return parseDate(settings.accountStart);
+  let first = null;
+  for (const s of sheets) {
+    const d = sheetFirstDate(s);
+    if (!first || d < first) first = d;
+  }
+  return first;
+}
+
+/**
+ * Überstunden-Konto je Monat: Ist − Soll, Tag für Tag.
+ * Soll: jeder Werktag Mo–Fr mit Wochen-Soll ÷ 5; im laufenden Monat nur bis einschließlich heute.
+ * Ist: „Stunden Gesamt“ jedes Tages (inkl. gutgeschriebener Stunden für Urlaub, Krankheit, Feiertag).
+ * Ergebnis: Map Jahr → Map Monat (1–12) → Saldo in Minuten
+ */
+function overtimeAccount() {
+  const result = new Map();
+  const start = accountStartDate();
+  if (!start) return result;
+  const ist = new Map();
+  for (const s of sheets) {
+    s.days.forEach((d, i) => {
+      if (!sheetIsActive(s, i)) return;
+      const key = isoDate(sheetDate(s, i));
+      ist.set(key, (ist.get(key) || 0) + dayTotal(d));
+    });
+  }
+  const dailySoll = Math.round((settings.target * 60) / 5);
+  const today = startOfDay(new Date());
+  for (let d = startOfDay(start); d <= today; d = addDays(d, 1)) {
+    const wd = d.getDay();
+    const soll = wd >= 1 && wd <= 5 ? dailySoll : 0;
+    const y = d.getFullYear();
+    const m = d.getMonth() + 1;
+    if (!result.has(y)) result.set(y, new Map());
+    const months = result.get(y);
+    months.set(m, (months.get(m) || 0) + (ist.get(isoDate(d)) || 0) - soll);
+  }
+  return result;
+}
+
+const yearBalance = (months) => [...months.values()].reduce((a, b) => a + b, 0);
+/** „+3,50 h“ / „−2,00 h“ */
+const fmtSigned = (min) => (min > 0 ? '+' : min < 0 ? '−' : '') + fmtH(Math.abs(min));
+
+/** Feiertage (Mo–Fr) eines Zettels als „Feiertag“ markieren, nur an Tagen ohne Einträge */
+function markHolidays(s) {
+  s.days.forEach((d, i) => {
+    if (i > 4 || !sheetIsActive(s, i) || d.status || dayHasTimes(d) || d.rows.some((r) => r.site || r.work)) return;
+    if (holidayName(sheetDate(s, i))) d.status = 'feiertag';
+  });
+}
+
+/** Hinweise vor dem Senden: unvollständige Zeilen, Überschneidungen, fehlende Angaben, leere Werktage */
+function sheetProblems(s) {
+  const problems = [];
+  s.days.forEach((d, i) => {
+    if (!sheetIsActive(s, i) || d.status) return;
+    const day = WEEKDAYS[i];
+    const timed = [];
+    d.rows.forEach((r) => {
+      const range = `${r.start != null ? fmtTime(r.start) : '?'}–${r.end != null ? fmtTime(r.end) : '?'}`;
+      if (r.start != null && r.end == null) problems.push(`${day}: Zeile ab ${fmtTime(r.start)} hat kein Ende`);
+      if (r.start == null && r.end != null) problems.push(`${day}: Zeile bis ${fmtTime(r.end)} hat keinen Beginn`);
+      if (r.start != null || r.end != null) {
+        if (!r.site.trim()) problems.push(`${day} ${range}: Baustelle fehlt`);
+        if (!r.work.trim()) problems.push(`${day} ${range}: Art der Arbeit fehlt`);
+      }
+      if (r.start != null && r.end != null && r.end > r.start) timed.push(r);
+    });
+    timed.sort((a, b) => a.start - b.start);
+    for (let k = 1; k < timed.length; k++) {
+      const a = timed[k - 1];
+      const b = timed[k];
+      if (b.start < a.end) {
+        problems.push(`${day}: ${fmtTime(a.start)}–${fmtTime(a.end)} und ${fmtTime(b.start)}–${fmtTime(b.end)} überschneiden sich`);
+      }
+    }
+    if (i < 5 && !dayHasTimes(d)) problems.push(`${day}: kein Eintrag`);
+  });
+  return problems;
+}
+
 function saveSheets() {
   try {
     localStorage.setItem(STORE_KEY, JSON.stringify(sheets));
@@ -167,6 +254,7 @@ function openOrCreate(anchor) {
   const found = existingSheet(anchor);
   if (found) return found.id;
   const s = newSheet(anchor, settings.name);
+  markHolidays(s);
   sheets.push(s);
   saveSheets();
   return s.id;
@@ -280,23 +368,29 @@ const fmtDays = (n) => `${n} ${n === 1 ? 'Tag' : 'Tage'}`;
 function statsCardHTML() {
   const year = new Date().getFullYear();
   const st = absenceStats().get(year) || { urlaub: 0, krank: 0 };
+  const yearMins = yearBalance(overtimeAccount().get(year) || new Map());
   return `<a class="card stats-card" href="#/uebersicht">
     <span class="stats-year">${year}</span>
     <span class="stats-item"><span class="stats-num">${st.urlaub}</span><span class="stats-label">${st.urlaub === 1 ? 'Urlaubstag' : 'Urlaubstage'}</span></span>
     <span class="stats-item"><span class="stats-num">${st.krank}</span><span class="stats-label">${st.krank === 1 ? 'Krankheitstag' : 'Krankheitstage'}</span></span>
+    ${settings.overtime ? `<span class="stats-item"><span class="stats-num ${balanceClass(yearMins)}">${fmtSigned(yearMins)}</span><span class="stats-label">Überstunden</span></span>` : ''}
     <span class="list-chevron">${ICON.chevronRight}</span>
   </a>`;
 }
 
+const balanceClass = (min) => (min > 0 ? 'plus' : min < 0 ? 'minus' : '');
+
 function renderStats() {
   const stats = absenceStats();
+  const account = settings.overtime ? overtimeAccount() : new Map();
   const current = new Date().getFullYear();
   if (!stats.has(current)) stats.set(current, { urlaub: 0, krank: 0 });
+  account.forEach((_, y) => { if (!stats.has(y)) stats.set(y, { urlaub: 0, krank: 0 }); });
   const years = [...stats.keys()].sort((a, b) => b - a);
   app.innerHTML = `
     <header class="nav">
       <button class="nav-btn back" data-act="back">${ICON.back}<span>Zettel</span></button>
-      <span class="nav-title">Urlaub &amp; Krankheit</span>
+      <span class="nav-title">Übersicht</span>
       <span class="nav-btn"></span>
     </header>
     ${years
@@ -306,10 +400,24 @@ function renderStats() {
         <div class="card form">
           <div class="field"><span>Urlaubstage</span><b>${fmtDays(st.urlaub)}</b></div>
           <div class="field"><span>Krankheitstage</span><b>${fmtDays(st.krank)}</b></div>
-        </div>`;
+        </div>
+        ${account.has(y) ? overtimeYearHTML(y, account.get(y)) : ''}`;
       })
       .join('')}
-    <p class="footnote">Gezählt werden alle Tage auf deinen Stundenzetteln, die als Urlaubstag bzw. Krankheitstag markiert sind.</p>`;
+    <p class="footnote">Urlaubs- und Krankheitstage: alle so markierten Tage auf deinen Stundenzetteln.</p>
+    ${settings.overtime && accountStartDate() ? `<p class="footnote">Überstunden je Monat: Stunden Gesamt aller Tage minus Soll (${fmtH(Math.round((settings.target * 60) / 5))} je Werktag Mo–Fr). Im laufenden Monat zählt das Soll bis heute. Plus- und Minusstunden werden verrechnet. Konto ab ${fmtShort(accountStartDate())}.</p>` : ''}`;
+}
+
+function overtimeYearHTML(year, months) {
+  const rows = [...months.keys()]
+    .sort((a, b) => b - a)
+    .map((m) => `<div class="field"><span>${MONTHS[m - 1]}</span><b class="${balanceClass(months.get(m))}">${fmtSigned(months.get(m))}</b></div>`)
+    .join('');
+  const total = yearBalance(months);
+  return `<div class="card form overtime-card">
+    <div class="field year-total"><span>Überstunden ${year}</span><b class="${balanceClass(total)}">${fmtSigned(total)}</b></div>
+    ${rows}
+  </div>`;
 }
 
 function listRowHTML(s) {
@@ -382,6 +490,7 @@ function dayHTML(s, i) {
       ${head}
       <div class="status-body">
         <b>${DAY_STATUS[day.status]}</b>
+        ${day.status === 'feiertag' && holidayName(date) ? `<span>${holidayName(date)}</span>` : ''}
         <span class="muted">${credit ? `${fmtH(credit)} gutgeschrieben` : 'keine Stunden gutgeschrieben'}</span>
       </div>
       <div class="day-foot"><span class="day-total">Gesamt <b>${fmtH(credit)}</b></span></div>
@@ -521,6 +630,7 @@ function changeWeek() {
     s.weekStart = n.weekStart;
     s.year = n.year;
     s.month = n.month;
+    markHolidays(s);
     saveSheets();
     refreshAll();
   });
@@ -529,12 +639,26 @@ function changeWeek() {
 function moreMenu() {
   const s = currentSheet();
   actionSheet([
-    { label: 'Als PDF senden', run: () => sharePdf(s, true) },
+    { label: 'Als PDF senden', run: () => sendWithCheck(s) },
     s.sentAt
       ? { label: 'Als offen markieren', run: () => { s.sentAt = null; saveSheets(); toast('Als offen markiert'); } }
       : { label: 'Als gesendet markieren', run: () => { s.sentAt = Date.now(); saveSheets(); toast('Als gesendet markiert'); } },
     { label: 'Stundenzettel löschen', destructive: true, run: () => askDelete(s.id, true) },
   ]);
+}
+
+function sendWithCheck(s) {
+  const problems = sheetProblems(s);
+  if (!problems.length) return sharePdf(s, true);
+  // „Trotzdem senden“ ist ein eigenes Antippen – nötig für Zwischenablage und Teilen-Menü
+  confirmDialog(
+    'Bitte prüfen',
+    `<ul class="problem-list">${problems.slice(0, 12).map((p) => `<li>${escapeHtml(p)}</li>`).join('')}${problems.length > 12 ? `<li>… und ${problems.length - 12} weitere</li>` : ''}</ul>`,
+    'Trotzdem senden',
+    () => sharePdf(s, true),
+    false,
+    'Zurück'
+  );
 }
 
 function askDelete(id, leave) {
@@ -634,11 +758,16 @@ function renderSettings() {
     <div class="card form">
       <label class="field toggle-field"><span>Überstunden berechnen</span><input type="checkbox" class="toggle" data-s="overtime" ${settings.overtime ? 'checked' : ''}></label>
       <label class="field ${settings.overtime ? '' : 'disabled'}" id="target-field"><span>Soll pro Woche (h)</span><input data-s="target" type="text" inputmode="decimal" value="${String(settings.target).replace('.', ',')}" ${settings.overtime ? '' : 'disabled'} enterkeyhint="done"></label>
+      <label class="field ${settings.overtime ? '' : 'disabled'}" id="start-field"><span>Konto ab</span><input data-s="accountStart" type="date" value="${settings.accountStart}" ${settings.overtime ? '' : 'disabled'}></label>
     </div>
-    <p class="footnote">Überstunden = Stunden Gesamt − Soll. Weniger Stunden als das Soll werden als 0 angezeigt.</p>
+    <p class="footnote">Auf dem Wochenzettel: Überstunden = Stunden Gesamt − Soll, weniger als das Soll zählt als 0. Das Überstunden-Konto in der Übersicht rechnet monatlich Tag für Tag und verrechnet Plus- und Minusstunden. „Konto ab“ leer lassen = ab dem ersten Stundenzettel.</p>
 
     <h2 class="section-title">Krankheit, Urlaub, Feiertage</h2>
     <div class="card form">
+      <label class="field"><span>Bundesland</span>
+        <select data-s="state">${Object.entries(STATES)
+          .map(([code, name]) => `<option value="${code}" ${settings.state === code ? 'selected' : ''}>${name}</option>`)
+          .join('')}</select></label>
       <label class="field"><span>Stunden pro Tag</span><input data-s="hoursPerDay" type="text" inputmode="decimal" value="${String(settings.hoursPerDay).replace('.', ',')}" enterkeyhint="done"></label>
       ${Object.entries(DAY_STATUS)
         .map(
@@ -884,11 +1013,11 @@ function actionSheet(actions) {
   });
 }
 
-function confirmDialog(title, message, okLabel, onOk, destructive = false) {
+function confirmDialog(title, message, okLabel, onOk, destructive = false, cancelLabel = 'Abbrechen') {
   const modal = openModal(
-    `<div class="alert-body"><b>${title}</b><p>${message}</p></div>
+    `<div class="alert-body"><b>${title}</b><div class="alert-msg">${message}</div></div>
     <div class="alert-buttons">
-      <button data-c="no">Abbrechen</button>
+      <button data-c="no">${cancelLabel}</button>
       <button data-c="yes" class="${destructive ? 'destructive' : 'strong'}">${okLabel}</button>
     </div>`,
     'alert'
@@ -1024,9 +1153,11 @@ document.addEventListener('input', (e) => {
     const key = t.dataset.s;
     if (key === 'overtime') {
       settings.overtime = t.checked;
-      const field = document.getElementById('target-field');
-      field.classList.toggle('disabled', !t.checked);
-      field.querySelector('input').disabled = !t.checked;
+      ['target-field', 'start-field'].forEach((fid) => {
+        const field = document.getElementById(fid);
+        field.classList.toggle('disabled', !t.checked);
+        field.querySelector('input').disabled = !t.checked;
+      });
     } else if (key === 'target' || key === 'hoursPerDay') {
       const v = parseFloat(t.value.replace(',', '.'));
       if (!Number.isNaN(v) && v >= 0) settings[key] = v;
