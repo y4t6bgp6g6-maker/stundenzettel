@@ -356,8 +356,7 @@ function renderEditor(id) {
       </button>
     </div>
     <div id="days">${s.days.map((_, i) => dayHTML(s, i)).join('')}</div>
-    <div class="card summary" id="summary">${summaryHTML(s)}</div>
-    <div class="bottom-bar"><button class="primary" data-act="send">${ICON.send} Als PDF senden</button></div>`;
+    <div class="card summary" id="summary">${summaryHTML(s)}</div>`;
 }
 
 function dayHTML(s, i) {
@@ -525,10 +524,10 @@ function changeWeek() {
 function moreMenu() {
   const s = currentSheet();
   actionSheet([
+    { label: 'Als PDF senden', run: () => sharePdf(s, true) },
     s.sentAt
       ? { label: 'Als offen markieren', run: () => { s.sentAt = null; saveSheets(); toast('Als offen markiert'); } }
       : { label: 'Als gesendet markieren', run: () => { s.sentAt = Date.now(); saveSheets(); toast('Als gesendet markiert'); } },
-    { label: 'PDF teilen / sichern', run: () => sharePdf(s, false) },
     { label: 'Stundenzettel löschen', destructive: true, run: () => askDelete(s.id, true) },
   ]);
 }
@@ -875,7 +874,8 @@ function actionSheet(actions) {
     if (!b) return;
     closeModal();
     const a = actions[Number(b.dataset.i)];
-    if (a) setTimeout(a.run, 280);
+    // sofort ausführen: Zwischenablage und Teilen-Menü funktionieren in Safari nur direkt beim Antippen
+    if (a) a.run();
   });
 }
 
@@ -949,9 +949,6 @@ document.addEventListener('click', (e) => {
       break;
     case 'more':
       moreMenu();
-      break;
-    case 'send':
-      sharePdf(currentSheet(), true);
       break;
     case 'time':
       editTime(el);

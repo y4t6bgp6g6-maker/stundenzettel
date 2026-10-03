@@ -208,7 +208,7 @@ function buildTimesheetPdf(sheet, overtimeTarget) {
     doc.textBox(WEEKDAYS[i], xs[0] + 3, y, xs[1] - xs[0] - 6, rowH, fs, true, 'left', active ? BLACK : GREY_TEXT);
 
     if (status) {
-      doc.labelBox(DAY_STATUS[status], xs[5] + 4, y, xs[6] - xs[5] - 8, h, Math.min(14, Math.max(fs + 3, h * 0.3)));
+      doc.labelBox(DAY_STATUS_SHORT[status], xs[5] + 4, y, xs[6] - xs[5] - 8, h, Math.min(14, Math.max(fs + 3, h * 0.3)));
       doc.textBox(fmtHours(dayTotal(day)), xs[7] + 3, y, xs[8] - xs[7] - 6, rowH, fs, false, 'right');
     } else if (active) {
       day.rows.forEach((row, r) => {
