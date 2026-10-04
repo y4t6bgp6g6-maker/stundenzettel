@@ -654,6 +654,12 @@ button.nav-title { font-size: 17px; padding: 8px 4px; }
   transition: opacity 0.2s, transform 0.2s;
 }
 .to-top.show { opacity: 1; transform: none; pointer-events: auto; }
+.to-top.floating { position: fixed; bottom: calc(20px + env(safe-area-inset-bottom)); z-index: 11; }
+
+/* Teilen und Menü oben rechts im Zettel */
+.nav-actions { display: inline-flex; align-items: center; }
+.nav-actions .nav-btn { padding: 0 6px; }
+.pill.empty { color: var(--muted); }
 
 /* Monate in der Übersicht */
 .month-link-value { display: inline-flex; align-items: center; gap: 4px; }

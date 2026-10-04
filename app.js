@@ -46,7 +46,7 @@ const escapeHtml = (s) =>
 
 // ───────────────────────── Datenmodell ─────────────────────────
 // Zettel: { id, weekStart: 'YYYY-MM-DD' (Montag), year, month, name, days[7], sentAt, createdAt, updatedAt }
-// Tag:    { pause: Minuten, status?: 'krank'|'urlaub'|'feiertag'|'frei', rows: [{ id, start, end, site, work }] }
+// Tag:    { pause: Minuten (null = noch nicht eingetragen), status?: 'krank'|'urlaub'|'feiertag'|'frei', rows: [{ id, start, end, site, work }] }
 //         (start/end: Minuten seit 00:00; bei gesetztem status werden die Zeilen ignoriert, bleiben aber erhalten)
 
 const DAY_STATUS = {
@@ -63,8 +63,10 @@ const rowMinutes = (r) => (r.start == null || r.end == null ? null : r.end >= r.
 const dayWorked = (d) => d.rows.reduce((s, r) => s + (rowMinutes(r) || 0), 0);
 /** Gutgeschriebene Minuten für Krankheit, Urlaub usw. laut Einstellungen */
 const statusCredit = (status) => (settings.credit[status] ? Math.round(settings.hoursPerDay * 60) : 0);
-const dayTotal = (d) => (d.status ? statusCredit(d.status) : Math.max(0, dayWorked(d) - d.pause));
+const dayTotal = (d) => (d.status ? statusCredit(d.status) : Math.max(0, dayWorked(d) - (d.pause || 0)));
 const dayHasTimes = (d) => d.rows.some((r) => r.start != null || r.end != null);
+/** Am Tag wurde schon etwas eingetragen, aber noch keine Pause (nur neue Zettel haben pause: null) */
+const pauseMissing = (d) => !d.status && d.pause == null && d.rows.some((r) => !rowIsEmpty(r));
 /** Mindestanzahl Zeilen im PDF: Mo–Fr 5, Sa/So 1 */
 const pdfMinRows = (i) => (i < 5 ? 5 : 1);
 
@@ -77,7 +79,7 @@ function newSheet(anchor, name) {
     year: a.getFullYear(),
     month: a.getMonth() + 1,
     name,
-    days: WEEKDAYS.map(() => ({ pause: 0, rows: [emptyRow()] })),
+    days: WEEKDAYS.map(() => ({ pause: null, rows: [emptyRow()] })),
     sentAt: null,
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -215,6 +217,7 @@ function sheetProblems(s) {
         problems.push(`${day}: Lücke von ${fmtTime(a.end)} bis ${fmtTime(b.start)}`);
       }
     }
+    if (pauseMissing(d)) problems.push(`${day}: Pause fehlt`);
     if (i < 5 && !dayHasTimes(d)) problems.push(`${day}: kein Eintrag`);
   });
   return problems;
@@ -281,6 +284,7 @@ const ICON = {
   chevronLeft: svg('<path d="M15 18l-6-6 6-6"/>', 20),
   chevronRight: svg('<path d="M9 18l6-6-6-6"/>', 20),
   search: svg('<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>'),
+  share: svg('<path d="M12 3v12M8 7l4-4 4 4"/><path d="M7 11H6a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2h-1"/>'),
   up: svg('<path d="M12 19V5M5 12l7-7 7 7"/>', 22),
   pin: svg('<path d="M12 21s-6-5.3-6-10a6 6 0 0 1 12 0c0 4.7-6 10-6 10z"/><circle cx="12" cy="11" r="2.2"/>', 15),
   tool: svg('<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3.6 17.4a1.4 1.4 0 0 0 2 2l5.7-5.7a4 4 0 0 0 5.4-5.4l-2.4 2.4-2-2z"/>', 15),
@@ -358,7 +362,7 @@ function renderList() {
     <div id="list-body">${listBodyHTML()}</div>
     ${
       searching
-        ? ''
+        ? `<button class="to-top floating" data-act="to-top" aria-label="Nach oben">${ICON.up}</button>`
         : `<div class="bottom-bar">
             <button class="to-top" data-act="to-top" aria-label="Nach oben">${ICON.up}</button>
             <button class="primary" data-act="new">${ICON.plus} Neuer Stundenzettel</button>
@@ -505,8 +509,8 @@ function renderStats() {
         ${account.has(y) ? overtimeYearHTML(y, account.get(y)) : ''}`;
       })
       .join('')}
-    <p class="footnote">Urlaubs- und Krankheitstage: alle so markierten Tage auf deinen Stundenzetteln.</p>
-    ${settings.overtime && sheets.length ? `<p class="footnote">Überstunden je Monat: Stunden Gesamt aller Tage minus Soll (${fmtH(Math.round((settings.target * 60) / 5))} je Werktag Mo–Fr). Gezählt werden nur Tage mit Stundenzettel bis heute; Wochen ohne Zettel bleiben außen vor. Plus- und Minusstunden werden verrechnet.</p>` : ''}`;
+    <p class="footnote">Gezählt werden alle Tage, die du als Urlaub oder Krankheit markiert hast.</p>
+    ${settings.overtime && sheets.length ? `<p class="footnote">Überstunden: Pro Werktag zählt alles über ${fmtH(Math.round((settings.target * 60) / 5))}. Nur Tage mit Stundenzettel zählen. Plus und Minus werden verrechnet.</p>` : ''}`;
 }
 
 function overtimeYearHTML(year, months) {
@@ -565,7 +569,10 @@ function renderEditor(id) {
     <header class="nav">
       <button class="nav-btn back" data-act="back">${ICON.back}<span>Zettel</span></button>
       <button class="nav-title" data-act="week" id="nav-title">${fmtShort(sheetFirstDate(s))} – ${fmtShort(sheetLastDate(s))}</button>
-      <button class="nav-btn" data-act="more" aria-label="Weitere Aktionen">${ICON.more}</button>
+      <span class="nav-actions">
+        <button class="nav-btn" data-act="share" aria-label="Als PDF senden">${ICON.share}</button>
+        <button class="nav-btn" data-act="more" aria-label="Weitere Aktionen">${ICON.more}</button>
+      </span>
       <div class="daybar" id="daybar">${dayBarHTML(s)}</div>
     </header>
     <div id="days">${daysHTML(s)}</div>
@@ -650,7 +657,7 @@ function dayHTML(s, i) {
     ${day.rows.map((r) => rowHTML(r, day.rows.length)).join('')}
     <div class="day-foot">
       <button class="link-btn" data-act="addrow">${ICON.plus} Zeile</button>
-      <button class="pill" data-act="pause">Pause ${fmtH(day.pause)}</button>
+      <button class="pill ${day.pause == null ? 'empty' : ''}" data-act="pause">Pause${day.pause == null ? '' : ` ${fmtH(day.pause)}`}${pauseMissing(day) ? ' ⚠️' : ''}</button>
       <span class="day-total">Gesamt <b>${fmtH(dayTotal(day))}</b></span>
     </div>
   </section>`;
@@ -895,7 +902,7 @@ function renderSettings() {
     <div class="card form">
       <label class="field"><span>Name</span><input data-s="name" placeholder="Vor- und Nachname" value="${escapeHtml(settings.name)}" autocomplete="name" enterkeyhint="done"></label>
     </div>
-    <p class="footnote">Wird auf jeden neuen Stundenzettel eingetragen.</p>
+    <p class="footnote">Steht auf jedem neuen Stundenzettel.</p>
 
     <h2 class="section-title">Eingabe &amp; Anzeige</h2>
     <div class="card form">
@@ -910,7 +917,7 @@ function renderSettings() {
           <option value="hm" ${settings.hourFormat === 'hm' ? 'selected' : ''}>Stunden/Min. (8h 30m)</option>
         </select></label>
     </div>
-    <p class="footnote">Die Zeitschritte gelten für Arbeitsbeginn, Arbeitsende und Pause. Das Stundenformat gilt für Stunden, Pause und Summen in der App und im PDF.</p>
+    <p class="footnote">Gilt in der App und im PDF.</p>
 
     <h2 class="section-title">Überstunden</h2>
     <div class="card form">
@@ -918,7 +925,7 @@ function renderSettings() {
       <label class="field ${settings.overtime ? '' : 'disabled'}" id="target-field"><span>Überstunden ab (h pro Woche)</span><input data-s="target" type="text" inputmode="decimal" value="${String(settings.target).replace('.', ',')}" ${settings.overtime ? '' : 'disabled'} enterkeyhint="done"></label>
       <label class="field toggle-field ${settings.overtime ? '' : 'disabled'}" id="prorate-field"><span>Überstunden bei Teilwochen anteilig</span><input type="checkbox" class="toggle" data-s="prorateTarget" ${settings.prorateTarget ? 'checked' : ''} ${settings.overtime ? '' : 'disabled'}></label>
     </div>
-    <p class="footnote">Auf dem Wochenzettel zählt als Überstunde, was über diese Stundenzahl hinausgeht. Liegt eine Woche in zwei Monaten, zählen bei „anteilig“ nur die Werktage Mo–Fr dieses Zettels (z. B. 3 Werktage = Überstunden ab 24 h), sonst gilt die volle Wochenzahl. Das Überstunden-Konto in der Übersicht rechnet monatlich Tag für Tag und verrechnet Plus- und Minusstunden. Tage ohne Stundenzettel zählen nicht mit.</p>
+    <p class="footnote">Alles über dieser Stundenzahl sind Überstunden. „Anteilig“: Bei einer halben Woche am Monatsende zählt nur der Anteil, z. B. 24 h für 3 Tage.</p>
 
     <h2 class="section-title">Krankheit, Urlaub, Feiertage</h2>
     <div class="card form">
@@ -934,14 +941,14 @@ function renderSettings() {
         )
         .join('')}
     </div>
-    <p class="footnote">Bei eingeschaltetem Schalter werden für diesen Tag die „Stunden pro Tag“ gutgeschrieben und in Stunden Gesamt und Überstunden mitgezählt. Ausgeschaltet zählt der Tag 0 Stunden.</p>
+    <p class="footnote">Eingeschaltet: Der Tag zählt mit den „Stunden pro Tag“. Ausgeschaltet: 0 Stunden.</p>
 
     <h2 class="section-title">Datensicherung</h2>
     <div class="card list">
       <button class="list-btn" data-act="backup-export">Sicherung speichern …</button>
       <label class="list-btn">Sicherung einlesen …<input type="file" accept="application/json,.json" data-act-change="backup-import" hidden></label>
     </div>
-    <p class="footnote">Die Stundenzettel sind nur auf diesem iPhone gespeichert. Speichere ab und zu eine Sicherung in „Dateien“ / iCloud Drive. Beim Einlesen kommen fehlende Zettel dazu. Gibt es einen Zettel schon, bleibt die zuletzt geänderte Fassung. Gelöscht wird nichts.</p>
+    <p class="footnote">Deine Zettel sind nur auf diesem iPhone. Speichere ab und zu eine Sicherung in iCloud Drive. Beim Einlesen geht nichts verloren.</p>
     <p class="footnote center muted">${sheets.length} Stundenzettel gespeichert</p>`;
 }
 
@@ -1264,6 +1271,10 @@ document.addEventListener('click', (e) => {
     case 'more':
       moreMenu();
       break;
+    case 'share':
+      // direkt im Antippen ausführen: Teilen-Menü und Zwischenablage gehen in Safari sonst nicht
+      sendWithCheck(currentSheet());
+      break;
     case 'time':
       editTime(el);
       break;
@@ -1366,6 +1377,9 @@ document.addEventListener('input', (e) => {
     if (row) {
       row[t.dataset.f] = t.value;
       t.closest('.suggest-wrap').classList.toggle('missing', fieldMissing(row, t.dataset.f));
+      const { day } = rowContext(t);
+      const pill = t.closest('.day')?.querySelector('[data-act="pause"]');
+      if (pill && day.pause == null) pill.textContent = `Pause${pauseMissing(day) ? ' ⚠️' : ''}`;
     }
     showChips(t);
     saveSheets(s);

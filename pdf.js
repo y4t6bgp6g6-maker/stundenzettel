@@ -222,7 +222,7 @@ function buildTimesheetPdf(sheet, overtimeTarget) {
         doc.wrapBox(row.work, xs[6] + 3, ry, xs[7] - xs[6] - 6, rowH, fs);
       });
       const first = (c, text) => doc.textBox(text, xs[c] + 3, y, xs[c + 1] - xs[c] - 6, rowH, fs, false, 'right');
-      if (day.pause > 0 || dayHasTimes(day)) first(4, fmtHours(day.pause));
+      if (day.pause != null && (day.pause > 0 || dayHasTimes(day))) first(4, fmtHours(day.pause));
       first(7, fmtHours(dayTotal(day)));
     }
     y += h;
