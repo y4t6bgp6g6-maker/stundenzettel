@@ -89,6 +89,8 @@ function rowsGapOrOverlap(d) {
 }
 /** Ende liegt vor dem Beginn */
 const endBeforeStart = (r) => r.start != null && r.end != null && r.end < r.start;
+/** Beginn und Ende sind gleich (0 Stunden) */
+const sameStartEnd = (r) => r.start != null && r.start === r.end;
 /** Feld der Zeile fehlt, sobald am Tag etwas eingetragen ist */
 const fieldMissing = (d, r, field) =>
   dayStarted(d) && (field === 'start' || field === 'end' ? r[field] == null : !String(r[field] || '').trim());
@@ -98,7 +100,7 @@ const dayHasWarning = (d) =>
   (pauseMissing(d) || d.rows.some((r) => timeWarning(d, r) || fieldMissing(d, r, 'site') || fieldMissing(d, r, 'work')));
 const sheetHasWarning = (s) => sheetActiveDays(s).some((i) => dayHasWarning(s.days[i]));
 const timeWarning = (d, r) =>
-  fieldMissing(d, r, 'start') || fieldMissing(d, r, 'end') || endBeforeStart(r) || rowsOutOfOrder(d).has(r.id) || rowsGapOrOverlap(d).has(r.id);
+  fieldMissing(d, r, 'start') || fieldMissing(d, r, 'end') || endBeforeStart(r) || sameStartEnd(r) || rowsOutOfOrder(d).has(r.id) || rowsGapOrOverlap(d).has(r.id);
 /** Mindestanzahl Zeilen im PDF: Mo–Fr 5, Sa/So 1 */
 const pdfMinRows = (i) => (i < 5 ? 5 : 1);
 
@@ -240,6 +242,7 @@ function sheetProblems(s) {
         .filter(([f]) => fieldMissing(d, r, f))
         .map(([, label]) => label);
       if (endBeforeStart(r)) problems.push(`${where}: Ende ${fmtTime(r.end)} liegt vor Beginn ${fmtTime(r.start)}`);
+      if (sameStartEnd(r)) problems.push(`${where}: Beginn und Ende sind gleich (${fmtTime(r.start)})`);
       if (missing.length) problems.push(`${where}: ${missing.join(', ')} ${missing.length > 1 ? 'fehlen' : 'fehlt'}`);
       if (r.start != null && r.end != null && r.end > r.start) timed.push(r);
     });
