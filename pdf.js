@@ -1,5 +1,5 @@
 'use strict';
-// Erzeugt den Stundenzettel als einseitiges A4-PDF (Hochformat), ohne externe Bibliothek.
+// Erzeugt Stundenzettel (A4 hoch) und Reisekostenabrechnung (A4 quer) als einseitige PDFs, ohne externe Bibliothek.
 // Schrift: Helvetica (PDF-Standardschrift), Text in WinAnsi-Kodierung (Umlaute, ß, –).
 
 const PDF_W = 595.28;
@@ -34,18 +34,26 @@ function pdfString(str) {
 const num = (v) => (Math.round(v * 100) / 100).toString();
 
 class PdfDoc {
-  constructor() {
+  constructor(w = PDF_W, h = PDF_H) {
+    this.w = w;
+    this.h = h;
     this.ops = [];
   }
   // Koordinaten von oben links (wie am Bildschirm); PDF rechnet von unten links.
   fill(x, y, w, h, gray) {
-    this.ops.push(`${num(gray)} g ${num(x)} ${num(PDF_H - y - h)} ${num(w)} ${num(h)} re f`);
+    this.ops.push(`${num(gray)} g ${num(x)} ${num(this.h - y - h)} ${num(w)} ${num(h)} re f`);
   }
   line(x1, y1, x2, y2, width, gray) {
-    this.ops.push(`${num(gray)} G ${num(width)} w ${num(x1)} ${num(PDF_H - y1)} m ${num(x2)} ${num(PDF_H - y2)} l S`);
+    this.ops.push(`${num(gray)} G ${num(width)} w ${num(x1)} ${num(this.h - y1)} m ${num(x2)} ${num(this.h - y2)} l S`);
+  }
+  // Linienzug mit runden Enden (z. B. Unterschrift)
+  path(points, width, gray = 0) {
+    if (points.length < 2) points = [points[0], [points[0][0] + 0.3, points[0][1]]];
+    const segs = points.map(([x, y], i) => `${num(x)} ${num(this.h - y)} ${i ? 'l' : 'm'}`).join(' ');
+    this.ops.push(`${num(gray)} G ${num(width)} w 1 J 1 j ${segs} S`);
   }
   text(str, x, baseline, size, bold, gray = 0) {
-    this.ops.push(`BT /${bold ? 'F2' : 'F1'} ${num(size)} Tf ${num(gray)} g ${num(x)} ${num(PDF_H - baseline)} Td (${pdfString(str)}) Tj ET`);
+    this.ops.push(`BT /${bold ? 'F2' : 'F1'} ${num(size)} Tf ${num(gray)} g ${num(x)} ${num(this.h - baseline)} Td (${pdfString(str)}) Tj ET`);
   }
   // Einzeiliger Text in einer Box: wird bei Bedarf verkleinert und notfalls gekürzt.
   textBox(str, x, y, w, h, size, bold, align = 'left', gray = 0) {
@@ -107,7 +115,7 @@ class PdfDoc {
     const objects = [
       '<< /Type /Catalog /Pages 2 0 R >>',
       '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
-      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PDF_W} ${PDF_H}] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>`,
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${num(this.w)} ${num(this.h)}] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>`,
       '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>',
       '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>',
       `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
@@ -247,4 +255,227 @@ function buildTimesheetPdf(sheet, overtimeTarget) {
   }
 
   return doc.output({ title: sheetTitle(sheet), author: sheet.name });
+}
+
+/** Text in Zeilen umbrechen, die in die Breite passen; Zeilenumbrüche im Text bleiben erhalten */
+function wrapLines(text, w, size) {
+  const lines = [];
+  for (const para of String(text ?? '').split('\n')) {
+    const words = para.trim().split(/\s+/).filter(Boolean);
+    let line = '';
+    for (const word of words) {
+      const next = line ? `${line} ${word}` : word;
+      if (line && measureText(next, size, false) > w) {
+        lines.push(line);
+        line = word;
+      } else {
+        line = next;
+      }
+    }
+    if (line) lines.push(line);
+  }
+  return lines;
+}
+
+/**
+ * Reisekostenabrechnung nach dem Formular des Arbeitgebers (A4 quer).
+ * @param t { name, from, to, rows: [{ date, start, end, minutes, text, ditto, meal }], total, place, signDate, signature, title }
+ */
+function buildTravelPdf(t) {
+  const W = 841.89;
+  const H = 595.28;
+  const doc = new PdfDoc(W, H);
+  const L = 30;
+  const R = W - 30;
+  const width = R - L;
+  const money = (v) => v.toFixed(2).replace('.', ',');
+  const clock = (m) => (m === 1440 ? '24:00' : fmtTime(m));
+  const hours = (m) => String(Math.round((m / 60) * 100) / 100).replace('.', ',');
+
+  // Kopf: Felder mit Linie zum Ausfüllen
+  const lineField = (label, x, y, w, labelW, value) => {
+    doc.textBox(label, x, y, labelW, 14, 8, false);
+    doc.line(x + labelW, y + 14, x + w, y + 14, 0.5, 0);
+    if (value) doc.textBox(value, x + labelW + 4, y - 1, w - labelW - 8, 14, 10.5, false);
+  };
+  doc.textBox('Reisekostenabrechnung', L, 22, 300, 28, 21, true);
+  lineField('Nr.', L + 312, 32, 100, 16);
+  lineField('vom', L + 428, 32, 120, 22, t.from);
+  lineField('bis', L + 562, 32, 110, 16, t.to);
+  lineField('Kostenstelle', L + 688, 32, width - 688, 48);
+  lineField('Name', L, 60, 330, 30, t.name);
+  lineField('Bank', L + 346, 60, 230, 24);
+  lineField('BIC', L + 592, 60, width - 592, 20);
+  lineField('Anschrift', L, 82, 330, 40);
+  lineField('IBAN', L + 346, 82, width - 346, 24);
+
+  // Spalten wie im Formular
+  const parts = [70, 90, 505, 45, 130, 140, 140, 140, 65, 150, 160];
+  const xs = [L];
+  parts.forEach((p) => xs.push(xs.at(-1) + (p / 1635) * width));
+  xs[xs.length - 1] = R;
+  const colW = (c) => xs[c + 1] - xs[c];
+  const headers = [
+    'Datum',
+    'Reise-\nBeginn/\nEnde\nUhr',
+    'Reiseanlass und Reiseweg\n(besuchte Orte angeben,\nOrt der Übernachtung unterstreichen)',
+    'Std.',
+    'Verpflegung',
+    'Übernachtung\n(ohne\nFrühstück)',
+    'Fahrtkosten',
+    'Neben-\nkosten',
+    'Beleg-\nNr.',
+    'Summe',
+    'Vorsteuer',
+  ];
+
+  const tableTop = 108;
+  const headerH = 40;
+  const sumRowH = 15;
+  const bottomRowH = 22;
+  const blockTop = H - 26 - 3 * bottomRowH;
+  const sumTop = blockTop - 4 * sumRowH - 6;
+  const bodyTop = tableTop + headerH;
+
+  // Zeilen je Tag: mindestens zwei (Beginn / Ende), mehr bei langem Reiseanlass
+  let fs = 9;
+  const layout = (size) =>
+    t.rows.map((r) => {
+      const lines = r.ditto ? ['"'] : wrapLines(r.text, colW(2) - 8, size);
+      return { r, lines, n: Math.max(2, lines.length) };
+    });
+  let blocks = layout(fs);
+  let used = blocks.reduce((a, b) => a + b.n, 0);
+  let rowCount = Math.max(14, used) + 1; // + Summenzeile
+  let rowH = (sumTop - bodyTop) / rowCount;
+  while (rowH < fs * 1.25 && fs > 5) {
+    fs -= 0.5;
+    blocks = layout(fs);
+    used = blocks.reduce((a, b) => a + b.n, 0);
+    rowCount = Math.max(14, used) + 1;
+    rowH = (sumTop - bodyTop) / rowCount;
+  }
+  const bodyBottom = bodyTop + rowCount * rowH;
+
+  headers.forEach((h, c) => {
+    const lines = h.split('\n');
+    const lh = 8.2;
+    const top = tableTop + (headerH - lines.length * lh) / 2;
+    lines.forEach((l, i) => doc.textBox(l, xs[c] + 2, top + i * lh, colW(c) - 4, lh, 7, false, 'center'));
+  });
+
+  // Einträge
+  const cell = (c, row, text, align = 'right', bold = false) => {
+    const padX = c === 3 ? 1.5 : 4; // schmale Spalte „Std.“
+    doc.textBox(text, xs[c] + padX, bodyTop + row * rowH, colW(c) - 2 * padX, rowH, fs, bold, align);
+  };
+  let row = 0;
+  for (const { r, lines, n } of blocks) {
+    cell(0, row, `${pad(r.date.getDate())}.`, 'left');
+    cell(0, row + 1, `${pad(r.date.getMonth() + 1)}.`, 'left');
+    if (r.start != null) cell(1, row, clock(r.start), 'center');
+    if (r.end != null) cell(1, row + 1, clock(r.end), 'center');
+    lines.forEach((l, i) => cell(2, row + i, l, r.ditto ? 'center' : 'left'));
+    if (r.minutes != null) cell(3, row + 1, hours(r.minutes), 'center');
+    if (r.meal) {
+      cell(4, row + 1, money(r.meal));
+      cell(9, row + 1, money(r.meal));
+    }
+    row += n;
+  }
+  cell(9, rowCount - 1, money(t.total), 'right', true);
+
+  // Tabellenlinien
+  doc.line(L, tableTop, R, tableTop, 0.9, 0);
+  doc.line(L, bodyTop, R, bodyTop, 0.9, 0);
+  for (let i = 1; i < rowCount; i++) doc.line(L, bodyTop + i * rowH, R, bodyTop + i * rowH, 0.35, 0.45);
+  doc.line(L, bodyBottom, R, bodyBottom, 1.6, 0);
+  xs.forEach((x, c) => doc.line(x, tableTop, x, bodyBottom, c === 9 || c === 10 ? 1.2 : 0.6, 0));
+
+  // Summenzeilen unter der Tabelle
+  const sums = [
+    ['Summe ', 'ohne', ' Vorsteuerabzug', true],
+    ['Summe ', 'mit', ' Vorsteuerabzug', false],
+    ['Summe ', 'ohne', ' Vorsteuerabzug (Übertrag Fahrtkosten Rückseite)', true],
+    ['Summe ', 'mit', ' Vorsteuerabzug (Übertrag Fahrtkosten Rückseite)', false],
+  ];
+  sums.forEach(([a, b, c, noTax], i) => {
+    const y = sumTop + 6 + i * sumRowH;
+    const label = a + b + c;
+    const lw = measureText(label, 8, false);
+    const lx = xs[3] - 8 - lw;
+    doc.text(label, lx, y + sumRowH / 2 + 2.8, 8);
+    // „ohne“ / „mit“ unterstrichen wie im Formular
+    const ux = lx + measureText(a, 8, false);
+    doc.line(ux, y + sumRowH / 2 + 4, ux + measureText(b, 8, false), y + sumRowH / 2 + 4, 0.4, 0);
+    doc.textBox('+', xs[8] + 4, y, colW(8) - 8, sumRowH, 8, false, 'right');
+    if (noTax) doc.textBox('—', xs[10] + 4, y, colW(10) - 8, sumRowH, 8, false, 'center');
+    const from = i < 2 ? 3 : 9;
+    doc.line(xs[from], y + sumRowH, R, y + sumRowH, 0.5, 0);
+  });
+  for (let c = 3; c <= 11; c++) {
+    if (c > 3 && c < 9) doc.line(xs[c], sumTop + 6, xs[c], sumTop + 6 + 2 * sumRowH, 0.5, 0);
+    else if (c >= 9) doc.line(xs[c], sumTop + 6, xs[c], blockTop, c === 9 || c === 10 ? 1.2 : 0.6, 0);
+  }
+  doc.line(xs[3], sumTop + 6, xs[3], sumTop + 6 + 2 * sumRowH, 0.5, 0);
+
+  // Unterer Block: Prüfvermerke, Ort/Datum, Unterschrift und Gesamtsumme
+  const leftEnd = xs[7];
+  const yA = blockTop;
+  const yB = yA + bottomRowH;
+  const yC = yB + bottomRowH;
+  const yEnd = yC + bottomRowH;
+  doc.line(L, yA, R, yA, 0.9, 0);
+  [yB, yC].forEach((y) => doc.line(L, y, R, y, 0.5, 0));
+  doc.line(L, yEnd, R, yEnd, 0.9, 0);
+  doc.line(L, yA, L, yEnd, 0.6, 0);
+  doc.line(leftEnd, yA, leftEnd, yEnd, 0.6, 0);
+  const small = (text, x, y, w) => text.split('\n').forEach((l, i, all) =>
+    doc.textBox(l, x, y + (bottomRowH - all.length * 8.5) / 2 + i * 8.5, w, 8.5, 7.5, false));
+
+  // Zeile A: geprüft | Zahlungsanweisung | gebucht
+  const aw = leftEnd - L;
+  const a1 = L + aw * 0.38;
+  const a2 = L + aw * 0.69;
+  doc.line(a1, yA, a1, yB, 0.5, 0);
+  doc.line(a2, yA, a2, yB, 0.5, 0);
+  small('geprüft', L + 4, yA, 60);
+  small('Zahlungs-\nanweisung', a1 + 4, yA, 60);
+  small('gebucht', a2 + 4, yA, 60);
+
+  // Zeile B: Ort, Datum | Abrechnung erstellt/Betrag erhalten
+  const bSplit = xs[4];
+  doc.line(bSplit, yB, bSplit, yEnd, 0.5, 0);
+  small('Ort, Datum', L + 4, yB, 50);
+  const placeDate = [t.place, t.signDate].filter(Boolean).join(', ');
+  doc.textBox(placeDate, L + 58, yB, bSplit - L - 62, bottomRowH, 10.5, false);
+  small('Abrechnung erstellt/\nBetrag erhalten', bSplit + 4, yB, leftEnd - bSplit - 8);
+
+  // Zeile C: Unterschrift (aus den Einstellungen, sonst leer)
+  small('Unterschrift', L + 4, yC, 50);
+  if (t.signature && t.signature.strokes && t.signature.strokes.length) {
+    const boxX = L + 58;
+    const boxW = Math.min(bSplit - boxX - 8, 170);
+    const boxH = bottomRowH + 10;
+    const ratio = t.signature.ratio || 0.35;
+    const scale = Math.min(boxW, boxH / ratio);
+    const top = yC + bottomRowH - 2 - ratio * scale;
+    for (const stroke of t.signature.strokes) {
+      doc.path(stroke.map(([x, y]) => [boxX + x * scale, top + y * ratio * scale]), 1.1, 0.1);
+    }
+  }
+
+  // Rechte Seite: Gesamtsumme, Vorschuss, Aus-/Rückzahlung
+  [
+    ['Gesamtsumme', '=', yA, money(t.total)],
+    ['Vorschuss', '–', yB, ''],
+    ['Aus-/\nRückzahlung', '=', yC, ''],
+  ].forEach(([label, sign, y, value]) => {
+    small(label, xs[7] + 4, y, xs[8] - xs[7] - 8);
+    doc.textBox(sign, xs[8] + 4, y, colW(8) - 8, bottomRowH, 9, false, 'right');
+    if (value) doc.textBox(value, xs[9] + 4, y, colW(9) - 8, bottomRowH, 10, true, 'right');
+  });
+  doc.line(xs[8], yA, xs[8], yEnd, 0.5, 0);
+
+  return doc.output({ title: t.title, author: t.name });
 }

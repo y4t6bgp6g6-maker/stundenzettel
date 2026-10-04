@@ -714,3 +714,69 @@ button.nav-title { font-size: 17px; padding: 8px 4px; }
 .db-name { position: relative; }
 .db-warn { position: absolute; left: 100%; top: 0; font-size: 10px; margin-left: 1px; }
 .list-warn { font-size: 14px; }
+
+/* Reisekosten */
+.list-btn.destructive { color: var(--danger); }
+.trip-pick {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 14px;
+  text-align: left;
+}
+.trip-pick:active { background: var(--fill); }
+.trip-check {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border-radius: 50%;
+  border: 1.5px solid var(--sep);
+  display: grid;
+  place-items: center;
+  color: #fff;
+}
+.trip-pick.on .trip-check { background: var(--accent); border-color: var(--accent); }
+.trip-pick-day { flex: none; min-width: 88px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.trip-pick.on .trip-pick-day { font-weight: 600; }
+.trip-pick-info { flex: 1; min-width: 0; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.trip-range { display: flex; justify-content: space-between; padding: 10px 6px 0; }
+.trip-std { font-variant-numeric: tabular-nums; font-size: 15px; }
+.trip-day .row { border-bottom: 0.5px solid var(--sep); }
+.trip-text {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  border: 0;
+  border-bottom: 1px solid var(--sep);
+  border-radius: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 16px;
+  line-height: 1.35;
+  padding: 6px 0;
+  resize: none;
+  overflow: hidden;
+}
+.trip-text:focus { border-bottom-color: var(--accent); }
+.trip-text::placeholder { color: var(--muted); opacity: 0.7; }
+.trip-ditto { font-size: 13px; margin: 6px 0 0; }
+.trip-meal { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
+.trip-meal input {
+  width: 80px;
+  border: 0;
+  outline: 0;
+  border-radius: 8px;
+  background: var(--fill);
+  padding: 6px 8px;
+  text-align: right;
+  font-size: 16px;
+}
+.sig-field { padding-top: 6px; padding-bottom: 6px; }
+.sig-preview { color: var(--text); max-width: 60%; }
+.sig-wrap { position: relative; margin: 8px 16px 4px; border-radius: 12px; background: var(--card); }
+.sig-canvas { display: block; width: 100%; touch-action: none; }
+.sig-line { position: absolute; left: 16px; right: 16px; bottom: 24%; border-bottom: 1px solid var(--sep); pointer-events: none; }
+.sig-hint { position: absolute; left: 0; right: 0; bottom: 8%; text-align: center; font-size: 13px; pointer-events: none; }

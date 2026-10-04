@@ -153,6 +153,8 @@ const DEFAULT_SETTINGS = {
   state: 'NI',
   credit: { krank: true, urlaub: true, feiertag: true, frei: false },
   prorateTarget: false,
+  place: '',
+  signature: null,
 };
 
 function readJson(key, fallback) {
@@ -347,11 +349,17 @@ let searchQuery = null;
 function route() {
   const hash = location.hash;
   const m = hash.match(/^#\/zettel\/(.+)$/);
+  const tm = hash.match(/^#\/reise\/(.+)$/);
   if (currentView === 'list') listScroll = window.scrollY;
+  if (currentView === 'trip') dropEmptyTrip();
   closeModal(true);
   trimWorkInput(suggestInput);
   hideChips();
-  if (m) {
+  if (tm) {
+    currentView = 'trip';
+    renderTrip(decodeURIComponent(tm[1]));
+    window.scrollTo(0, 0);
+  } else if (m) {
     currentView = 'editor';
     renderEditor(decodeURIComponent(m[1]));
     window.scrollTo(0, 0);
@@ -876,6 +884,7 @@ function moreMenu() {
   const s = currentSheet();
   actionSheet([
     { label: 'Als PDF senden', run: () => sendWithCheck(s) },
+    { label: 'Reisekostenabrechnung', run: () => openTripMenu(s) },
     s.sentAt
       ? { label: 'Als offen markieren', run: () => { s.sentAt = null; saveSheets(s); toast('Als offen markiert'); } }
       : { label: 'Als gesendet markieren', run: () => { s.sentAt = Date.now(); saveSheets(s); toast('Als gesendet markiert'); } },
@@ -960,6 +969,472 @@ async function sharePdf(s, isSend) {
   }
 }
 
+// ───────────────────────── Reisekosten ─────────────────────────
+// Abrechnung: { id, sheetId, dates: ['YYYY-MM-DD'], over: { Datum: { start, end, text, meal } }, from, to (angezeigte Tage),
+//   place, signDate, name, sentAt, createdAt, updatedAt }. Ohne Eintrag in „over“ kommt der Wert aus dem Stundenzettel.
+
+const TRIP_KEY = 'stundenzettel.trips.v1';
+let trips = readJson(TRIP_KEY, []);
+let tripId = null;
+
+function saveTrips(changed) {
+  if (changed) changed.updatedAt = Date.now();
+  try {
+    localStorage.setItem(TRIP_KEY, JSON.stringify(trips));
+  } catch {
+    toast('Speichern fehlgeschlagen!');
+  }
+}
+const findTrip = (id) => trips.find((t) => t.id === id);
+const currentTrip = () => findTrip(tripId);
+const fmtClock = (m) => (m === 1440 ? '24:00' : fmtTime(m));
+const fmtEuro = (v) => `${v.toFixed(2).replace('.', ',')} €`;
+const fmtStd = (m) => `${String(Math.round((m / 60) * 100) / 100).replace('.', ',')} Std.`;
+
+/** Tag aus dem passenden Stundenzettel (oder null) */
+function sheetDayFor(date) {
+  const s = existingSheet(date);
+  const i = (date.getDay() + 6) % 7;
+  return s && sheetIsActive(s, i) ? s.days[i] : null;
+}
+
+/** Baustellen zusammenfassen: „Muster GmbH, Nordstadt“ + „Muster GmbH, Südstadt“ → „Muster GmbH, Nordstadt, Südstadt“ */
+function joinSites(sites) {
+  const groups = [];
+  for (const site of sites) {
+    const m = site.match(/^([^,]+),\s*(.+)$/);
+    const last = groups.at(-1);
+    if (m && last && last.prefix.toLowerCase() === m[1].trim().toLowerCase()) last.rest.push(m[2].trim());
+    else groups.push(m ? { prefix: m[1].trim(), rest: [m[2].trim()] } : { prefix: site, rest: [] });
+  }
+  return groups.map((g) => [g.prefix, ...g.rest].join(', ')).join(', ');
+}
+const uniqueTexts = (list) => {
+  const seen = new Set();
+  return list.filter((v) => v && !seen.has(v.toLowerCase()) && seen.add(v.toLowerCase()));
+};
+
+/** Reiseanlass aus dem Stundenzettel: erst die Baustellen, darunter die Art der Arbeit */
+function tripTextFor(day) {
+  if (!day || day.status) return '';
+  const sites = uniqueTexts(day.rows.map((r) => (r.site || '').trim()));
+  const works = uniqueTexts(day.rows.flatMap((r) => (r.work || '').split(',').map((w) => w.trim())));
+  return [joinSites(sites), works.join(', ')].filter(Boolean).join('\n');
+}
+
+/** Automatische Werte: erster Tag ab Arbeitsbeginn bis 24:00, mittlere Tage ganz, letzter Tag bis Arbeitsende */
+function tripAuto(trip, iso) {
+  const date = parseDate(iso);
+  const prev = trip.dates.includes(isoDate(addDays(date, -1)));
+  const next = trip.dates.includes(isoDate(addDays(date, 1)));
+  const day = sheetDayFor(date);
+  const rows = day && !day.status ? day.rows : [];
+  const starts = rows.map((r) => r.start).filter((v) => v != null);
+  const ends = rows.map((r) => r.end).filter((v) => v != null);
+  return {
+    start: prev ? 0 : starts.length ? Math.min(...starts) : null,
+    end: next ? 1440 : ends.length ? Math.max(...ends) : null,
+    text: tripTextFor(day),
+    // Nur mehrtägige Reisen: An- und Abreisetag 14 €, volle Tage 28 €
+    meal: prev && next ? 28 : prev || next ? 14 : 0,
+  };
+}
+
+/** Alle Reisetage mit den gültigen Werten (eigene Änderungen vor Werten aus dem Stundenzettel) */
+function tripRows(trip) {
+  let prevText = null;
+  return [...trip.dates].sort().map((iso) => {
+    const auto = tripAuto(trip, iso);
+    const over = trip.over[iso] || {};
+    const pick = (k) => (k in over ? over[k] : auto[k]);
+    const start = pick('start');
+    const end = pick('end');
+    const text = pick('text') || '';
+    const meal = pick('meal') || 0;
+    const minutes = start != null && end != null ? (end >= start ? end - start : end + 1440 - start) : null;
+    // Gleicher Text wie in der Zeile darüber: im PDF steht nur „〃“
+    const ditto = !!text.trim() && text.trim() === prevText;
+    prevText = text.trim();
+    return { iso, date: parseDate(iso), start, end, minutes, text, meal, ditto, auto, over };
+  });
+}
+const tripTotal = (rows) => rows.reduce((t, r) => t + r.meal, 0);
+const tripTitle = (trip) => {
+  const d = [...trip.dates].sort();
+  return d.length ? `Reisekostenabrechnung ${fmtShort(parseDate(d[0]))} - ${fmtShort(parseDate(d.at(-1)))}` : 'Reisekostenabrechnung';
+};
+
+/** Abrechnungen, die Tage dieses Stundenzettels enthalten oder von ihm aus angelegt wurden */
+function tripsForSheet(s) {
+  const dates = new Set(sheetActiveDays(s).map((i) => isoDate(sheetDate(s, i))));
+  return trips.filter((t) => t.sheetId === s.id || t.dates.some((d) => dates.has(d)));
+}
+
+function openTripMenu(s) {
+  const list = tripsForSheet(s).filter((t) => t.dates.length);
+  const create = () => {
+    const t = {
+      id: uid(),
+      sheetId: s.id,
+      dates: [],
+      over: {},
+      from: isoDate(sheetFirstDate(s)),
+      to: isoDate(sheetLastDate(s)),
+      place: settings.place,
+      signDate: isoDate(new Date()),
+      name: s.name || settings.name,
+      sentAt: null,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    trips.push(t);
+    saveTrips();
+    location.hash = `#/reise/${t.id}`;
+  };
+  if (!list.length) return create();
+  actionSheet([
+    ...list.map((t) => ({ label: escapeHtml(tripTitle(t)), run: () => (location.hash = `#/reise/${t.id}`) })),
+    { label: 'Neue Reisekostenabrechnung', run: create },
+  ]);
+}
+
+/** Leere Abrechnungen (kein Tag angetippt) beim Verlassen wieder entfernen */
+function dropEmptyTrip() {
+  const t = currentTrip();
+  if (t && !t.dates.length) {
+    trips = trips.filter((x) => x !== t);
+    saveTrips();
+  }
+}
+
+function renderTrip(id) {
+  const t = findTrip(id);
+  if (!t) {
+    location.replace('#/');
+    return;
+  }
+  tripId = id;
+  app.innerHTML = `
+    <header class="nav">
+      <button class="nav-btn back" data-act="back">${ICON.back}<span>Zettel</span></button>
+      <span class="nav-title">Reisekosten</span>
+      <span class="nav-actions">
+        <button class="nav-btn" data-act="trip-share" aria-label="Als PDF senden">${ICON.share}</button>
+        <button class="nav-btn" data-act="trip-more" aria-label="Weitere Aktionen">${ICON.more}</button>
+      </span>
+    </header>
+    <div id="trip-body">${tripBodyHTML(t)}</div>`;
+}
+
+function tripBodyHTML(t) {
+  const rows = tripRows(t);
+  const selected = new Set(t.dates);
+  // Angezeigte Tage: Bereich der Abrechnung, mindestens alle angetippten Tage
+  const sorted = [...t.dates].sort();
+  let from = parseDate(sorted[0] && sorted[0] < t.from ? sorted[0] : t.from);
+  const to = parseDate(sorted.at(-1) && sorted.at(-1) > t.to ? sorted.at(-1) : t.to);
+  const picks = [];
+  for (let d = from; d <= to; d = addDays(d, 1)) {
+    const iso = isoDate(d);
+    const day = sheetDayFor(d);
+    const info = !day ? '' : day.status ? DAY_STATUS_SHORT[day.status] : joinSites(uniqueTexts(day.rows.map((r) => (r.site || '').trim())));
+    picks.push(`<button class="trip-pick ${selected.has(iso) ? 'on' : ''}" data-act="trip-toggle" data-date="${iso}">
+        <span class="trip-check">${selected.has(iso) ? ICON.check : ''}</span>
+        <span class="trip-pick-day">${WEEKDAYS_SHORT[(d.getDay() + 6) % 7]} ${fmtDayMonth(d)}</span>
+        <span class="trip-pick-info muted">${escapeHtml(info) || '–'}</span>
+      </button>`);
+  }
+  const sig = settings.signature && settings.signature.strokes && settings.signature.strokes.length;
+  return `
+    <h2 class="section-title">Reisetage</h2>
+    <div class="card list">${picks.join('')}</div>
+    <div class="trip-range">
+      <button class="link-btn" data-act="trip-range" data-dir="-1">${ICON.chevronLeft} Woche davor</button>
+      <button class="link-btn" data-act="trip-range" data-dir="1">Woche danach ${ICON.chevronRight}</button>
+    </div>
+    <p class="footnote">Tippe die Tage an, an denen du unterwegs warst.</p>
+    ${rows.map(tripDayHTML).join('')}
+    ${
+      rows.length
+        ? `<h2 class="section-title">Abschluss</h2>
+    <div class="card form">
+      <label class="field"><span>Ort</span><input data-tp="place" placeholder="z. B. Firmensitz" value="${escapeHtml(t.place || '')}" enterkeyhint="done"></label>
+      <label class="field"><span>Datum</span><input type="date" data-tp="signDate" value="${t.signDate || ''}"></label>
+      <div class="field"><span>Unterschrift</span><span class="muted">${sig ? 'aus den Einstellungen' : 'keine (in den Einstellungen)'}</span></div>
+    </div>
+    <div class="card summary"><div class="sum-row"><span>Gesamtsumme</span><b id="trip-total">${fmtEuro(tripTotal(rows))}</b></div></div>`
+        : ''
+    }`;
+}
+
+function tripDayHTML(r) {
+  const wd = WEEKDAYS[(r.date.getDay() + 6) % 7];
+  const timeBtn = (which, label) =>
+    `<button class="time ${r[which] == null ? 'empty' : ''}" data-act="trip-time" data-which="${which}">${r[which] == null ? label : fmtClock(r[which])}</button>`;
+  return `<section class="day trip-day" data-date="${r.iso}">
+    <div class="day-head"><div><b>${wd}</b> <span class="muted">${fmtDayMonth(r.date)}</span></div><span class="muted trip-std">${r.minutes == null ? '' : fmtStd(r.minutes)}</span></div>
+    <div class="row">
+      <div class="row-times">
+        ${timeBtn('start', 'Beginn')}
+        <span class="arrow">–</span>
+        ${timeBtn('end', 'Ende')}
+        ${r.start == null || r.end == null ? '<span class="time-warn show">⚠️</span>' : ''}
+      </div>
+      <textarea class="trip-text" data-t="text" rows="2" placeholder="Reiseanlass und Reiseweg" autocapitalize="sentences">${escapeHtml(r.text)}</textarea>
+      <p class="trip-ditto muted" ${r.ditto ? '' : 'hidden'}>Gleicher Text wie darüber – im PDF steht „〃“.</p>
+    </div>
+    <div class="day-foot">
+      <span>Verpflegung</span>
+      <label class="trip-meal"><input data-t="meal" type="text" inputmode="decimal" value="${r.meal ? r.meal.toFixed(2).replace('.', ',') : ''}" placeholder="0,00" enterkeyhint="done"> €</label>
+    </div>
+  </section>`;
+}
+
+/** Ansicht neu aufbauen, Scroll-Position bleibt */
+function refreshTrip() {
+  const t = currentTrip();
+  const body = document.getElementById('trip-body');
+  if (!t || !body) return;
+  const y = window.scrollY;
+  body.innerHTML = tripBodyHTML(t);
+  window.scrollTo(0, y);
+  document.querySelectorAll('.trip-text').forEach(fitTextarea);
+}
+const fitTextarea = (el) => {
+  el.style.height = 'auto';
+  el.style.height = `${el.scrollHeight}px`;
+};
+
+function setTripOver(t, iso, key, value) {
+  t.over[iso] = { ...(t.over[iso] || {}), [key]: value };
+  saveTrips(t);
+}
+
+function editTripTime(btn) {
+  const t = currentTrip();
+  const iso = btn.closest('[data-date]').dataset.date;
+  const which = btn.dataset.which;
+  const r = tripRows(t).find((x) => x.iso === iso);
+  const initial = r[which] ?? (which === 'start' ? 6 * 60 : 18 * 60);
+  const step = settings.minuteStep;
+  const hours = Array.from({ length: 25 }, (_, i) => i);
+  const minutes = Array.from({ length: 60 / step }, (_, i) => i * step);
+  wheelPicker(
+    which === 'start' ? 'Reisebeginn' : 'Reiseende',
+    [
+      { values: hours, label: pad },
+      { values: minutes, label: pad, sep: ':' },
+    ],
+    [Math.floor(initial / 60), initial % 60],
+    ([h, m]) => {
+      setTripOver(t, iso, which, Math.min(h * 60 + m, 1440));
+      refreshTrip();
+    },
+    which in r.over ? `<button class="modal-wide" data-m="extra">Wie im Stundenzettel</button>` : '',
+    () => {
+      delete t.over[iso][which];
+      saveTrips(t);
+      refreshTrip();
+    }
+  );
+}
+
+function toggleTripDay(iso) {
+  const t = currentTrip();
+  if (t.dates.includes(iso)) t.dates = t.dates.filter((d) => d !== iso);
+  else t.dates.push(iso);
+  saveTrips(t);
+  refreshTrip();
+}
+
+function shiftTripRange(dir) {
+  const t = currentTrip();
+  if (dir < 0) t.from = isoDate(addDays(parseDate(t.from), -7));
+  else t.to = isoDate(addDays(parseDate(t.to), 7));
+  saveTrips(t);
+  refreshTrip();
+}
+
+function tripMoreMenu() {
+  const t = currentTrip();
+  actionSheet([
+    { label: 'Als PDF senden', run: () => sendTripWithCheck(t) },
+    {
+      label: 'Neu aus Stundenzettel übernehmen',
+      run: () =>
+        confirmDialog('Neu übernehmen?', 'Deine Änderungen an Uhrzeiten, Reiseanlass und Verpflegung werden verworfen.', 'Übernehmen', () => {
+          t.over = {};
+          saveTrips(t);
+          refreshTrip();
+        }),
+    },
+    t.sentAt
+      ? { label: 'Als offen markieren', run: () => { t.sentAt = null; saveTrips(t); toast('Als offen markiert'); } }
+      : { label: 'Als gesendet markieren', run: () => { t.sentAt = Date.now(); saveTrips(t); toast('Als gesendet markiert'); } },
+    {
+      label: 'Abrechnung löschen',
+      destructive: true,
+      run: () =>
+        confirmDialog('Abrechnung löschen?', `${escapeHtml(tripTitle(t))} wird endgültig gelöscht.`, 'Löschen', () => {
+          trips = trips.filter((x) => x !== t);
+          saveTrips();
+          goBack();
+        }, true),
+    },
+  ]);
+}
+
+function tripProblems(t) {
+  const problems = [];
+  if (!(t.name || settings.name).trim()) problems.push('Name fehlt (in den Einstellungen)');
+  for (const r of tripRows(t)) {
+    const day = `${WEEKDAYS_SHORT[(r.date.getDay() + 6) % 7]} ${fmtDayMonth(r.date)}`;
+    const missing = [r.start == null && 'Beginn', r.end == null && 'Ende', !r.text.trim() && 'Reiseanlass'].filter(Boolean);
+    if (missing.length) problems.push(`${day}: ${missing.join(', ')} ${missing.length > 1 ? 'fehlen' : 'fehlt'}`);
+  }
+  if (!(t.place || '').trim()) problems.push('Ort fehlt');
+  return problems;
+}
+
+function sendTripWithCheck(t) {
+  if (!t.dates.length) return toast('Bitte zuerst die Reisetage antippen');
+  const problems = tripProblems(t);
+  if (!problems.length) return shareTripPdf(t);
+  confirmDialog(
+    'Bitte prüfen',
+    `<ul class="problem-list">${problems.map((p) => `<li>${escapeHtml(p)}</li>`).join('')}</ul>`,
+    'Trotzdem senden',
+    () => shareTripPdf(t),
+    false,
+    'Zurück'
+  );
+}
+
+function tripPdfFile(t) {
+  const rows = tripRows(t);
+  const sorted = rows.map((r) => r.date);
+  const blob = buildTravelPdf({
+    title: tripTitle(t),
+    name: t.name || settings.name,
+    from: fmtShort(sorted[0]),
+    to: fmtShort(sorted.at(-1)),
+    rows,
+    total: tripTotal(rows),
+    place: (t.place || '').trim(),
+    signDate: t.signDate ? fmtShort(parseDate(t.signDate)) : '',
+    signature: settings.signature,
+  });
+  return new File([blob], `${tripTitle(t)}.pdf`, { type: 'application/pdf' });
+}
+
+async function shareTripPdf(t) {
+  let file;
+  try {
+    file = tripPdfFile(t);
+  } catch (e) {
+    toast('PDF konnte nicht erstellt werden');
+    return;
+  }
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(tripTitle(t)).then(
+      () => toast('Betreff kopiert – in Mail bei „Betreff“ einsetzen', 4000),
+      () => {}
+    );
+  }
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file] });
+    } catch (e) {
+      if (e && e.name === 'AbortError') return;
+      downloadFile(file);
+    }
+  } else {
+    downloadFile(file);
+  }
+  if (!t.sentAt) {
+    confirmDialog('Wurde die Abrechnung gesendet?', 'Dann wird sie als gesendet markiert.', 'Ja, gesendet', () => {
+      t.sentAt = Date.now();
+      saveTrips(t);
+    });
+  }
+}
+
+// ───────────────────────── Unterschrift ─────────────────────────
+// Gespeichert als Linienzüge: { ratio: Höhe/Breite, strokes: [[[x, y], …], …] } mit x, y zwischen 0 und 1
+
+function signatureSVG(sig, height = 44) {
+  const ratio = sig.ratio || 0.35;
+  const paths = sig.strokes
+    .map((st) => `<polyline points="${st.map(([x, y]) => `${(x * 100).toFixed(1)},${(y * ratio * 100).toFixed(1)}`).join(' ')}"/>`)
+    .join('');
+  return `<svg class="sig-preview" viewBox="0 0 100 ${(ratio * 100).toFixed(1)}" height="${height}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
+}
+
+function signaturePad() {
+  const modal = openModal(
+    `${modalHead('Unterschrift')}
+    <div class="sig-wrap"><canvas class="sig-canvas"></canvas><div class="sig-line"></div><span class="sig-hint muted">Mit dem Finger unterschreiben</span></div>
+    <button class="modal-wide" data-m="clear">Neu beginnen</button>`,
+    'sheet'
+  );
+  const canvas = modal.querySelector('canvas');
+  const hint = modal.querySelector('.sig-hint');
+  const w = modal.querySelector('.sig-wrap').clientWidth;
+  const h = Math.round(w * 0.4);
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  canvas.style.height = `${h}px`;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.lineWidth = 2.5;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = getComputedStyle(document.body).color;
+  let strokes = [];
+  let current = null;
+  const point = (e) => {
+    const r = canvas.getBoundingClientRect();
+    return [Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), Math.min(1, Math.max(0, (e.clientY - r.top) / r.height))];
+  };
+  canvas.addEventListener('pointerdown', (e) => {
+    canvas.setPointerCapture(e.pointerId);
+    current = [point(e)];
+    strokes.push(current);
+    hint.hidden = true;
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!current) return;
+    const p = point(e);
+    const last = current.at(-1);
+    current.push(p);
+    ctx.beginPath();
+    ctx.moveTo(last[0] * w, last[1] * h);
+    ctx.lineTo(p[0] * w, p[1] * h);
+    ctx.stroke();
+  });
+  const stop = () => (current = null);
+  canvas.addEventListener('pointerup', stop);
+  canvas.addEventListener('pointercancel', stop);
+  modal.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-m]');
+    if (!b) return;
+    if (b.dataset.m === 'clear') {
+      strokes = [];
+      ctx.clearRect(0, 0, w, h);
+      hint.hidden = false;
+      return;
+    }
+    if (b.dataset.m === 'ok' && strokes.length) {
+      const round = (v) => Math.round(v * 1000) / 1000;
+      settings.signature = { ratio: round(h / w), strokes: strokes.map((st) => st.map(([x, y]) => [round(x), round(y)])) };
+      saveSettings();
+    }
+    closeModal();
+    renderSettings();
+  });
+}
+
 // ───────────────────────── Einstellungen ─────────────────────────
 
 function renderSettings() {
@@ -1014,6 +1489,19 @@ function renderSettings() {
     </div>
     <p class="footnote">Eingeschaltet: Der Tag zählt mit den „Stunden pro Tag“. Ausgeschaltet: 0 Stunden.</p>
 
+    <h2 class="section-title">Reisekosten</h2>
+    <div class="card form">
+      <label class="field"><span>Ort</span><input data-s="place" placeholder="z. B. Firmensitz" value="${escapeHtml(settings.place || '')}" enterkeyhint="done"></label>
+      ${
+        settings.signature
+          ? `<div class="field sig-field"><span>Unterschrift</span>${signatureSVG(settings.signature)}</div>
+      <button class="list-btn" data-act="sign">Neu unterschreiben …</button>
+      <button class="list-btn destructive" data-act="sign-clear">Unterschrift löschen</button>`
+          : `<button class="list-btn" data-act="sign">Unterschrift hinzufügen …</button>`
+      }
+    </div>
+    <p class="footnote">Ort und Unterschrift stehen unten auf der Reisekostenabrechnung. Ohne Unterschrift bleibt das Feld leer.</p>
+
     <h2 class="section-title">Datensicherung</h2>
     <div class="card list">
       <button class="list-btn" data-act="backup-export">Sicherung speichern …</button>
@@ -1024,7 +1512,7 @@ function renderSettings() {
 }
 
 function exportBackup() {
-  const data = JSON.stringify({ app: 'stundenzettel', version: 1, exportedAt: new Date().toISOString(), sheets, settings }, null, 2);
+  const data = JSON.stringify({ app: 'stundenzettel', version: 1, exportedAt: new Date().toISOString(), sheets, trips, settings }, null, 2);
   const file = new File([data], `Stundenzettel-Sicherung ${isoDate(new Date())}.json`, { type: 'application/json' });
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
     navigator.share({ files: [file] }).catch((e) => {
@@ -1066,6 +1554,17 @@ async function importBackup(input) {
     }
     sheets = [...byId.values()];
     saveSheets();
+    // Reisekostenabrechnungen: gleiche ID → die zuletzt geänderte Fassung gewinnt
+    if (Array.isArray(data.trips)) {
+      const tripById = new Map(trips.map((t) => [t.id, t]));
+      for (const t of data.trips) {
+        if (!t || !t.id || !Array.isArray(t.dates)) continue;
+        const cur = tripById.get(t.id);
+        if (!cur || (t.updatedAt || 0) > (cur.updatedAt || 0)) tripById.set(t.id, { over: {}, ...t });
+      }
+      trips = [...tripById.values()];
+      saveTrips();
+    }
     renderSettings();
     const parts = [`${added} Stundenzettel neu`];
     if (updated) parts.push(`${updated} aktualisiert`);
@@ -1486,6 +1985,32 @@ document.addEventListener('click', (e) => {
     case 'backup-export':
       exportBackup();
       break;
+    case 'trip-toggle':
+      toggleTripDay(el.dataset.date);
+      break;
+    case 'trip-range':
+      shiftTripRange(Number(el.dataset.dir));
+      break;
+    case 'trip-time':
+      editTripTime(el);
+      break;
+    case 'trip-more':
+      tripMoreMenu();
+      break;
+    case 'trip-share':
+      // direkt im Antippen ausführen: Teilen-Menü und Zwischenablage gehen in Safari sonst nicht
+      sendTripWithCheck(currentTrip());
+      break;
+    case 'sign':
+      signaturePad();
+      break;
+    case 'sign-clear':
+      confirmDialog('Unterschrift löschen?', 'Neue Abrechnungen haben dann keine Unterschrift.', 'Löschen', () => {
+        settings.signature = null;
+        saveSettings();
+        renderSettings();
+      }, true);
+      break;
     case 'search':
       searchQuery = '';
       renderList();
@@ -1529,6 +2054,27 @@ document.addEventListener('input', (e) => {
     }
     showChips(t);
     saveSheets(s);
+  } else if (t.dataset.t) {
+    const trip = currentTrip();
+    const iso = t.closest('[data-date]').dataset.date;
+    if (t.dataset.t === 'text') {
+      setTripOver(trip, iso, 'text', t.value);
+      fitTextarea(t);
+      // „〃“-Hinweise der Tage passen sich an
+      const rows = tripRows(trip);
+      document.querySelectorAll('.trip-day').forEach((el) => {
+        const r = rows.find((x) => x.iso === el.dataset.date);
+        if (r) el.querySelector('.trip-ditto').hidden = !r.ditto;
+      });
+    } else {
+      const v = parseFloat(t.value.replace(',', '.'));
+      setTripOver(trip, iso, 'meal', Number.isNaN(v) ? 0 : Math.max(0, v));
+      document.getElementById('trip-total').textContent = fmtEuro(tripTotal(tripRows(trip)));
+    }
+  } else if (t.dataset.tp) {
+    const trip = currentTrip();
+    trip[t.dataset.tp] = t.value;
+    saveTrips(trip);
   } else if (t.dataset.search != null) {
     searchQuery = t.value;
     refreshListBody();
