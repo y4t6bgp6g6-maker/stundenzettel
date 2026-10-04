@@ -262,8 +262,12 @@ function collectSuggestions(field) {
   for (const s of sheets)
     for (const d of s.days)
       for (const r of d.rows) {
-        const v = (r[field] || '').trim();
-        if (v) counts.set(v, (counts.get(v) || 0) + 1);
+        // Art der Arbeit: „Spachteln, Schleifen“ ergibt zwei Vorschläge
+        const parts = field === 'work' ? (r[field] || '').split(',') : [r[field] || ''];
+        for (const part of parts) {
+          const v = part.trim();
+          if (v) counts.set(v, (counts.get(v) || 0) + 1);
+        }
       }
   return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'de')).map(([v]) => v);
 }
@@ -305,6 +309,7 @@ function route() {
   const m = hash.match(/^#\/zettel\/(.+)$/);
   if (currentView === 'list') listScroll = window.scrollY;
   closeModal(true);
+  hideChips();
   if (m) {
     currentView = 'editor';
     renderEditor(decodeURIComponent(m[1]));
@@ -697,8 +702,8 @@ function rowHTML(r, rowCount) {
       <span class="row-hours">${m == null ? '' : fmtH(m)}</span>
       ${rowCount > 1 ? `<button class="row-del" data-act="delrow" aria-label="Zeile löschen">${ICON.close}</button>` : '<span class="row-del-space"></span>'}
     </div>
-    <div class="suggest-wrap ${fieldMissing(r, 'site') ? 'missing' : ''}"><span class="field-icon">${ICON.pin}</span><span class="warn" aria-label="fehlt">⚠️</span><input class="txt" data-f="site" placeholder="Baustelle" value="${escapeHtml(r.site)}" autocomplete="off" autocapitalize="sentences" enterkeyhint="next"><div class="chips"></div></div>
-    <div class="suggest-wrap ${fieldMissing(r, 'work') ? 'missing' : ''}"><span class="field-icon">${ICON.tool}</span><span class="warn" aria-label="fehlt">⚠️</span><input class="txt" data-f="work" placeholder="Art der Arbeit" value="${escapeHtml(r.work)}" autocomplete="off" autocapitalize="sentences" enterkeyhint="done"><div class="chips"></div></div>
+    <div class="suggest-wrap ${fieldMissing(r, 'site') ? 'missing' : ''}"><span class="field-icon">${ICON.pin}</span><span class="warn" aria-label="fehlt">⚠️</span><input class="txt" data-f="site" placeholder="Baustelle" value="${escapeHtml(r.site)}" autocomplete="off" autocapitalize="sentences" enterkeyhint="next"></div>
+    <div class="suggest-wrap ${fieldMissing(r, 'work') ? 'missing' : ''}"><span class="field-icon">${ICON.tool}</span><span class="warn" aria-label="fehlt">⚠️</span><input class="txt" data-f="work" placeholder="Art der Arbeit" value="${escapeHtml(r.work)}" autocomplete="off" autocapitalize="sentences" enterkeyhint="done"></div>
   </div>`;
 }
 
@@ -1228,21 +1233,117 @@ function toast(text, ms = 2200) {
 
 // ───────────────────────── Vorschläge (Baustelle / Art der Arbeit) ─────────────────────────
 
+/** Feste Leiste direkt über der Tastatur, zeigt die Vorschläge zum gerade bearbeiteten Feld */
+const suggestBar = document.createElement('div');
+suggestBar.id = 'suggest-bar';
+suggestBar.innerHTML = '<div class="suggest-grid"></div>';
+document.body.appendChild(suggestBar);
+const suggestGrid = suggestBar.firstChild;
+let suggestInput = null;
+
+/** Art der Arbeit: Teile vor dem letzten Komma (fertig) und der Text dahinter (Suchbegriff) */
+function workParts(value) {
+  const parts = value.split(',');
+  const last = parts.pop().trim();
+  return { done: parts.map((p) => p.trim()).filter(Boolean), last };
+}
+const isKnown = (field, text) => suggestions[field].some((v) => v.toLowerCase() === text.toLowerCase());
+
+function suggestionsFor(input) {
+  const field = input.dataset.f;
+  let q = input.value.trim().toLowerCase();
+  let used = [];
+  if (field === 'work') {
+    const { done, last } = workParts(input.value);
+    used = done.map((v) => v.toLowerCase());
+    // Ein vollständiger Eintrag am Ende gilt als ausgewählt, danach wird alles Übrige vorgeschlagen
+    if (last && isKnown('work', last)) {
+      used.push(last.toLowerCase());
+      q = '';
+    } else {
+      q = last.toLowerCase();
+    }
+  }
+  const match = (query) =>
+    suggestions[field].filter((v) => {
+      const l = v.toLowerCase();
+      return l !== query && !used.includes(l) && (!query || l.includes(query));
+    });
+  const list = match(q);
+  // Art der Arbeit: Passt eigener Text zu keinem Vorschlag, trotzdem alle zum Anhängen zeigen
+  return field === 'work' && q && !list.length ? match('') : list;
+}
+
 function showChips(input) {
-  const wrap = input.closest('.suggest-wrap');
-  if (!wrap) return;
-  const chips = wrap.querySelector('.chips');
-  const q = input.value.trim().toLowerCase();
-  const list = (suggestions[input.dataset.f] || [])
-    .filter((v) => v.toLowerCase() !== q && (!q || v.toLowerCase().includes(q)))
-    .slice(0, 10);
-  chips.innerHTML = list.map((v) => `<button class="chip" data-chip="${escapeHtml(v)}">${escapeHtml(v)}</button>`).join('');
-  chips.classList.toggle('show', list.length > 0);
+  suggestInput = input;
+  const list = suggestionsFor(input).slice(0, 30);
+  suggestGrid.innerHTML = list.map((v) => `<button class="chip" data-chip="${escapeHtml(v)}">${escapeHtml(v)}</button>`).join('');
+  suggestGrid.scrollLeft = 0;
+  suggestBar.classList.toggle('show', list.length > 0);
+  placeSuggestBar();
 }
-function hideChips(input) {
-  const chips = input.closest('.suggest-wrap')?.querySelector('.chips');
-  if (chips) chips.classList.remove('show');
+function hideChips() {
+  suggestInput = null;
+  suggestBar.classList.remove('show');
 }
+
+/** Leiste an die Oberkante der Tastatur setzen und das Feld darüber sichtbar halten */
+function placeSuggestBar() {
+  if (!suggestBar.classList.contains('show')) return;
+  const vv = window.visualViewport;
+  const bottom = vv ? vv.offsetTop + vv.height : window.innerHeight;
+  const top = bottom - suggestBar.offsetHeight;
+  suggestBar.style.top = `${top}px`;
+  if (suggestInput) {
+    const r = suggestInput.getBoundingClientRect();
+    if (r.bottom > top - 8) window.scrollBy(0, r.bottom - top + 16);
+  }
+}
+if (window.visualViewport) {
+  visualViewport.addEventListener('resize', () => requestAnimationFrame(placeSuggestBar));
+  visualViewport.addEventListener('scroll', () => requestAnimationFrame(placeSuggestBar));
+}
+
+/** Vorschlag übernehmen: Baustelle ersetzt und schließt, Art der Arbeit hängt mit Komma an */
+function pickChip(text) {
+  const input = suggestInput;
+  if (!input) return;
+  if (input.dataset.f === 'work') {
+    const { done, last } = workParts(input.value);
+    // Angefangener Text wird durch den Vorschlag ersetzt, ein fertiger Eintrag bleibt stehen
+    if (last && isKnown('work', last)) done.push(last);
+    else if (last && !text.toLowerCase().includes(last.toLowerCase())) done.push(last);
+    done.push(text);
+    input.value = done.join(', ');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  } else {
+    input.value = text;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    hideChips();
+    input.blur();
+  }
+}
+
+// Antippen ohne Fokusverlust: Auswahl beim Loslassen, Wischen zum Blättern bleibt möglich
+let chipTouch = null;
+suggestBar.addEventListener('touchstart', (e) => {
+  const t = e.touches[0];
+  chipTouch = { x: t.clientX, y: t.clientY, chip: e.target.closest('[data-chip]') };
+}, { passive: true });
+suggestBar.addEventListener('touchend', (e) => {
+  const t = e.changedTouches[0];
+  const start = chipTouch;
+  chipTouch = null;
+  e.preventDefault(); // kein Klick danach, das Eingabefeld behält den Fokus
+  if (start && start.chip && Math.abs(t.clientX - start.x) < 10 && Math.abs(t.clientY - start.y) < 10) {
+    pickChip(start.chip.dataset.chip);
+  }
+}, { passive: false });
+suggestBar.addEventListener('mousedown', (e) => e.preventDefault());
+suggestBar.addEventListener('click', (e) => {
+  const chip = e.target.closest('[data-chip]');
+  if (chip) pickChip(chip.dataset.chip);
+});
 
 // ───────────────────────── Ereignisse ─────────────────────────
 
@@ -1339,35 +1440,6 @@ document.addEventListener('click', (e) => {
   }
 });
 
-// Vorschlag antippen, ohne dass das Eingabefeld vorher den Fokus verliert
-let swallowTapUntil = 0;
-document.addEventListener('pointerdown', (e) => {
-  const chip = e.target.closest('[data-chip]');
-  if (!chip) return;
-  e.preventDefault();
-  const input = chip.closest('.suggest-wrap').querySelector('input');
-  input.value = chip.dataset.chip;
-  input.dispatchEvent(new Event('input', { bubbles: true }));
-  hideChips(input);
-  input.blur();
-  // Die Vorschläge verschwinden sofort und der Inhalt rutscht nach oben. Der Klick, den Safari nach
-  // dem Loslassen auslöst, würde sonst auf „+ Zeile“, „Pause“ o. Ä. darunter landen.
-  swallowTapUntil = Date.now() + 700;
-});
-for (const type of ['mousedown', 'mouseup', 'click']) {
-  document.addEventListener(
-    type,
-    (e) => {
-      if (Date.now() < swallowTapUntil) {
-        e.preventDefault();
-        e.stopPropagation();
-        if (type === 'click') swallowTapUntil = 0;
-      }
-    },
-    true
-  );
-}
-
 document.addEventListener('input', (e) => {
   const t = e.target;
   if (t.dataset.f) {
@@ -1419,7 +1491,7 @@ document.addEventListener('focusin', (e) => {
   if (e.target.matches('.txt')) showChips(e.target);
 });
 document.addEventListener('focusout', (e) => {
-  if (e.target.matches('.txt')) hideChips(e.target);
+  if (e.target.matches('.txt') && suggestInput === e.target) hideChips();
 });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && e.target.matches('input:not([type=checkbox])')) {
