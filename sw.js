@@ -1,5 +1,5 @@
 // Offline-Cache: Mit Internet wird immer die neueste Version geladen, ohne Internet die gespeicherte.
-const CACHE = 'stundenzettel-v16';
+const CACHE = 'stundenzettel-v17';
 const ASSETS = [
   './',
   'index.html',
@@ -11,6 +11,7 @@ const ASSETS = [
   'icons/apple-touch-icon.png',
   'icons/icon-192.png',
   'icons/icon-512.png',
+  'icons/icon-maskable-512.png',
 ];
 
 self.addEventListener('install', (event) => {
