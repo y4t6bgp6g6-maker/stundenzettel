@@ -114,7 +114,7 @@ const DEFAULT_SETTINGS = {
   overtime: true,
   target: 40,
   hoursPerDay: 8,
-  minuteStep: 15,
+  minuteStep: 30,
   hourFormat: 'dec',
   state: 'NI',
   credit: { krank: true, urlaub: true, feiertag: true, frei: false },

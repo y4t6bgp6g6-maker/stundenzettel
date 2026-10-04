@@ -543,7 +543,11 @@ input { font: inherit; color: inherit; }
   padding: 12px 0;
   min-width: 0;
   flex: 1;
+  outline: none;
 }
+/* Kein blauer Fokusrahmen um Auswahlfelder und Schalter */
+.field select:focus, .field select:focus-visible, .toggle:focus, .toggle:focus-visible,
+.field:focus, .field:focus-within { outline: none; box-shadow: none; }
 .stats-card { margin-top: 4px; }
 
 /* Warnsymbol bei fehlender Baustelle / Art der Arbeit */
