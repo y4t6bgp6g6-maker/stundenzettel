@@ -333,6 +333,7 @@ const ICON = {
   share: svg('<path d="M12 3v12M8 7l4-4 4 4"/><path d="M7 11H6a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2h-1"/>'),
   up: svg('<path d="M12 19V5M5 12l7-7 7 7"/>', 22),
   pin: svg('<path d="M12 21s-6-5.3-6-10a6 6 0 0 1 12 0c0 4.7-6 10-6 10z"/><circle cx="12" cy="11" r="2.2"/>', 15),
+  suitcase: svg('<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 13h18"/>', 22),
   tool: svg('<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3.6 17.4a1.4 1.4 0 0 0 2 2l5.7-5.7a4 4 0 0 0 5.4-5.4l-2.4 2.4-2-2z"/>', 15),
 };
 
@@ -366,6 +367,10 @@ function route() {
   } else if (hash === '#/einstellungen') {
     currentView = 'settings';
     renderSettings();
+    window.scrollTo(0, 0);
+  } else if (hash === '#/reisekosten') {
+    currentView = 'trips';
+    renderTripList();
     window.scrollTo(0, 0);
   } else if (hash === '#/uebersicht') {
     currentView = 'stats';
@@ -411,7 +416,7 @@ function renderList() {
             ${sheets.length ? `<button class="nav-btn" data-act="search" aria-label="Suchen">${ICON.search}</button>` : '<span class="nav-btn"></span>'}`
       }
     </header>
-    ${!searching && sheets.length ? statsCardHTML() : ''}
+    ${!searching && sheets.length ? statsCardHTML() + tripsCardHTML() : ''}
     ${searching ? '' : '<h1 class="large-title">Stundenzettel</h1>'}
     <div id="list-body">${listBodyHTML()}</div>
     ${
@@ -1070,27 +1075,30 @@ function tripsForSheet(s) {
   return trips.filter((t) => t.sheetId === s.id || t.dates.some((d) => dates.has(d)));
 }
 
+/** Neue, noch leere Abrechnung anlegen und öffnen; angezeigt werden zunächst die Tage from–to */
+function createTrip(from, to, sheet) {
+  const t = {
+    id: uid(),
+    sheetId: sheet ? sheet.id : null,
+    dates: [],
+    over: {},
+    from: isoDate(from),
+    to: isoDate(to),
+    place: settings.place,
+    signDate: isoDate(new Date()),
+    name: (sheet && sheet.name) || settings.name,
+    sentAt: null,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  trips.push(t);
+  saveTrips();
+  location.hash = `#/reise/${t.id}`;
+}
+
 function openTripMenu(s) {
   const list = tripsForSheet(s).filter((t) => t.dates.length);
-  const create = () => {
-    const t = {
-      id: uid(),
-      sheetId: s.id,
-      dates: [],
-      over: {},
-      from: isoDate(sheetFirstDate(s)),
-      to: isoDate(sheetLastDate(s)),
-      place: settings.place,
-      signDate: isoDate(new Date()),
-      name: s.name || settings.name,
-      sentAt: null,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-    trips.push(t);
-    saveTrips();
-    location.hash = `#/reise/${t.id}`;
-  };
+  const create = () => createTrip(sheetFirstDate(s), sheetLastDate(s), s);
   if (!list.length) return create();
   actionSheet([
     ...list.map((t) => ({ label: escapeHtml(tripTitle(t)), run: () => (location.hash = `#/reise/${t.id}`) })),
@@ -1105,6 +1113,103 @@ function dropEmptyTrip() {
     trips = trips.filter((x) => x !== t);
     saveTrips();
   }
+}
+
+/** Karte auf der Startseite: führt zur Liste der Reisekostenabrechnungen */
+function tripsCardHTML() {
+  const list = trips.filter((t) => t.dates.length);
+  const open = list.filter((t) => !t.sentAt).length;
+  return `<a class="card stats-card trips-card" href="#/reisekosten">
+    <span class="trips-icon">${ICON.suitcase}</span>
+    <span class="stats-item"><span class="trips-title">Reisekosten</span><span class="stats-label">${
+      list.length ? `${list.length} ${list.length === 1 ? 'Abrechnung' : 'Abrechnungen'}${open ? ` · ${open} offen` : ''}` : 'Noch keine Abrechnung'
+    }</span></span>
+    <span class="list-chevron">${ICON.chevronRight}</span>
+  </a>`;
+}
+
+const tripFirstDate = (t) => parseDate([...t.dates].sort()[0]);
+const tripLastDate = (t) => parseDate([...t.dates].sort().at(-1));
+
+function renderTripList() {
+  const list = trips.filter((t) => t.dates.length);
+  const groups = new Map();
+  for (const t of list) {
+    const d = tripFirstDate(t);
+    const key = d.getFullYear() * 100 + d.getMonth() + 1;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(t);
+  }
+  const keys = [...groups.keys()].sort((a, b) => b - a);
+  app.innerHTML = `
+    <header class="nav">
+      <button class="nav-btn back" data-act="back">${ICON.back}<span>Zettel</span></button>
+      <span class="nav-title"></span>
+      <span class="nav-btn"></span>
+    </header>
+    <h1 class="large-title">Reisekosten</h1>
+    ${
+      keys.length
+        ? keys
+            .map((k) => {
+              const items = groups.get(k).sort((a, b) => tripFirstDate(b) - tripFirstDate(a));
+              return `<h2 class="section-title">${MONTHS[(k % 100) - 1]} ${Math.floor(k / 100)}</h2>
+          <div class="card list">${items.map(tripRowHTML).join('')}</div>`;
+            })
+            .join('')
+        : `<div class="empty">
+      <div class="empty-icon">${svg('<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 13h18"/>', 44)}</div>
+      <p><b>Noch keine Reisekostenabrechnung</b></p>
+      <p class="muted">Tippe unten auf „Neue Reisekostenabrechnung“ und wähle eine Woche.</p>
+    </div>`
+    }
+    <div class="bottom-bar">
+      <button class="to-top" data-act="to-top" aria-label="Nach oben">${ICON.up}</button>
+      <button class="primary" data-act="trip-new">${ICON.plus} Neue Reisekostenabrechnung</button>
+    </div>`;
+}
+
+function tripRowHTML(t) {
+  const sent = !!t.sentAt;
+  const rows = tripRows(t);
+  const sites = joinSites(
+    uniqueTexts(
+      rows.flatMap((r) => {
+        const day = sheetDayFor(r.date);
+        return day && !day.status ? day.rows.map((x) => (x.site || '').trim()) : [];
+      })
+    )
+  );
+  return `<div class="swipe">
+    <div class="swipe-track">
+      <a class="list-row" href="#/reise/${encodeURIComponent(t.id)}">
+        <span class="status ${sent ? 'sent' : 'open'}">${sent ? ICON.check : ''}</span>
+        <span class="list-main">
+          <span class="list-title">${fmtShort(tripFirstDate(t))} – ${fmtShort(tripLastDate(t))}</span>
+          <span class="list-sub trip-sites">${sent ? 'gesendet' : 'offen'}${sites ? ` · ${escapeHtml(sites)}` : ''}</span>
+        </span>
+        <span class="list-hours">${fmtEuro(tripTotal(rows))}</span>
+        <span class="list-chevron">${ICON.chevronRight}</span>
+      </a>
+      <button class="swipe-del" data-act="trip-delete" data-id="${t.id}">Löschen</button>
+    </div>
+  </div>`;
+}
+
+function newTripFromList() {
+  weekPicker(new Date(), null, (anchor) => {
+    const monday = mondayOf(anchor);
+    createTrip(monday, addDays(monday, 6), existingSheet(anchor));
+  }, true);
+}
+
+function askDeleteTrip(t, leave) {
+  confirmDialog('Abrechnung löschen?', `${escapeHtml(tripTitle(t))} wird endgültig gelöscht.`, 'Löschen', () => {
+    trips = trips.filter((x) => x !== t);
+    saveTrips();
+    if (leave) goBack();
+    else renderTripList();
+  }, true);
 }
 
 function renderTrip(id) {
@@ -1274,12 +1379,7 @@ function tripMoreMenu() {
     {
       label: 'Abrechnung löschen',
       destructive: true,
-      run: () =>
-        confirmDialog('Abrechnung löschen?', `${escapeHtml(tripTitle(t))} wird endgültig gelöscht.`, 'Löschen', () => {
-          trips = trips.filter((x) => x !== t);
-          saveTrips();
-          goBack();
-        }, true),
+      run: () => askDeleteTrip(t, true),
     },
   ]);
 }
@@ -1729,7 +1829,8 @@ function timePicker(title, initial, hasValue, onDone) {
   );
 }
 
-function weekPicker(initial, excludeId, onPick) {
+/** Wochenwahl; forTrip: für eine Reisekostenabrechnung (ganze Woche, ohne Hinweise zu Stundenzetteln) */
+function weekPicker(initial, excludeId, onPick, forTrip = false) {
   let selected = startOfDay(initial);
   let month = new Date(selected.getFullYear(), selected.getMonth(), 1);
   const modal = openModal(`${modalHead('Woche wählen', 'Übernehmen')}<div class="wp"></div>`, 'sheet');
@@ -1761,7 +1862,7 @@ function weekPicker(initial, excludeId, onPick) {
                   'wp-day',
                   d.getMonth() !== month.getMonth() ? 'out' : '',
                   inWeek ? 'in-week' : '',
-                  inWeek && d.getMonth() + 1 === preview.month && d.getFullYear() === preview.year ? 'in-sheet' : '',
+                  inWeek && (forTrip || (d.getMonth() + 1 === preview.month && d.getFullYear() === preview.year)) ? 'in-sheet' : '',
                   sameDay(d, selected) ? 'sel' : '',
                   sameDay(d, today) ? 'today' : '',
                 ].join(' ');
@@ -1771,10 +1872,17 @@ function weekPicker(initial, excludeId, onPick) {
           })
           .join('')}
       </div>
-      <div class="wp-preview">
+      ${
+        forTrip
+          ? `<div class="wp-preview">
+        <b>Woche ${fmtShort(mondayOf(selected))} – ${fmtShort(addDays(mondayOf(selected), 6))}</b>
+        <span class="muted">Danach tippst du die Reisetage an.</span>
+      </div>`
+          : `<div class="wp-preview">
         <b>${sheetTitle(preview)}</b>
         <span class="muted">${exists ? (excludeId ? 'Für diese Woche gibt es schon einen Zettel' : 'Gibt es schon – wird geöffnet') : 'Ausgegraute Tage gehören zum anderen Monat'}</span>
-      </div>`;
+      </div>`
+      }`;
   }
   draw();
 
@@ -2027,6 +2135,14 @@ document.addEventListener('click', (e) => {
     case 'backup-export':
       exportBackup();
       break;
+    case 'trip-new':
+      newTripFromList();
+      break;
+    case 'trip-delete': {
+      const t = findTrip(el.dataset.id);
+      if (t) askDeleteTrip(t, false);
+      break;
+    }
     case 'trip-toggle':
       toggleTripDay(el.dataset.date);
       break;

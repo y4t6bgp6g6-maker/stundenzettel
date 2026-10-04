@@ -102,6 +102,7 @@ input { font: inherit; color: inherit; }
 .swipe-track { display: flex; width: calc(100% + 92px); }
 .list-row {
   flex: 0 0 calc(100% - 92px);
+  min-width: 0;
   scroll-snap-align: start;
   display: flex;
   align-items: center;
@@ -132,7 +133,7 @@ input { font: inherit; color: inherit; }
 .list-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .list-title { font-weight: 600; }
 .list-sub { font-size: 14px; color: var(--muted); }
-.list-hours { color: var(--muted); font-variant-numeric: tabular-nums; }
+.list-hours { flex: none; white-space: nowrap; color: var(--muted); font-variant-numeric: tabular-nums; }
 .list-chevron { color: var(--sep); display: flex; }
 .list-btn {
   display: block;
@@ -780,3 +781,7 @@ button.nav-title { font-size: 17px; padding: 8px 4px; }
 .sig-canvas { display: block; width: 100%; touch-action: none; }
 .sig-line { position: absolute; left: 16px; right: 16px; bottom: 24%; border-bottom: 1px solid var(--sep); pointer-events: none; }
 .sig-hint { position: absolute; left: 0; right: 0; bottom: 8%; text-align: center; font-size: 13px; pointer-events: none; }
+.trips-card { margin-top: 10px; }
+.trips-icon { display: flex; color: var(--accent); }
+.trips-title { font-size: 17px; font-weight: 600; }
+.trip-sites { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
