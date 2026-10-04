@@ -395,7 +395,7 @@ function renderList() {
       ${
         searching
           ? `<div class="search-bar">
-              <span class="search-field">${ICON.search}<input type="search" data-search placeholder="Baustelle oder Datum" value="${escapeHtml(searchQuery)}" autocomplete="off" enterkeyhint="search"></span>
+              <span class="search-field">${ICON.search}<input type="search" data-search placeholder="Baustelle, Urlaub oder Datum" value="${escapeHtml(searchQuery)}" autocomplete="off" enterkeyhint="search"></span>
               <button class="nav-btn" data-act="search-close">Abbrechen</button>
             </div>`
           : `<button class="nav-btn" data-act="settings" aria-label="Einstellungen">${ICON.gear}</button>
@@ -446,7 +446,7 @@ function listBodyHTML() {
   if (searching) {
     return query
       ? `<p class="search-empty muted">Keine Stundenzettel gefunden</p>`
-      : `<p class="search-empty muted">Suche nach einer Baustelle (z. B. „Lindenstraße“) oder einem Datum (z. B. „15.09.“ oder „15.09.26“).</p>`;
+      : `<p class="search-empty muted">Suche nach einer Baustelle (z. B. „Lindenstraße“), nach „Urlaub“ oder „Krank“ oder nach einem Datum (z. B. „15.09.“).</p>`;
   }
   return `<div class="empty">
       <div class="empty-icon">${svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/>', 44)}</div>
@@ -475,6 +475,15 @@ function searchSheet(s, query) {
     const dayNames = [];
     for (const i of days) {
       let dayHit = false;
+      // Tagesart (Urlaub, Krank, …) zählt als Treffer, die Zeilen des Tages dann nicht
+      const status = s.days[i].status;
+      if (status) {
+        if ([DAY_STATUS_SHORT[status], DAY_STATUS[status]].some((v) => v.toLowerCase().includes(query.text))) {
+          found.add(DAY_STATUS_SHORT[status]);
+          dayNames.push(WEEKDAYS_SHORT[i]);
+        }
+        continue;
+      }
       for (const r of s.days[i].rows) {
         for (const v of [r.site, r.work]) {
           if (v && v.toLowerCase().includes(query.text)) {
