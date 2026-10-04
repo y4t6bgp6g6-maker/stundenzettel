@@ -1349,21 +1349,22 @@ function hideChips() {
   suggestBar.classList.remove('show');
 }
 
-/** Leiste an die Oberkante der Tastatur setzen und das Feld darüber sichtbar halten */
-function placeSuggestBar() {
+/** Leiste an die Oberkante der Tastatur setzen; beim Öffnen und Tippen das Feld darüber sichtbar halten */
+function placeSuggestBar(keepVisible = true) {
   if (!suggestBar.classList.contains('show')) return;
   const vv = window.visualViewport;
   const bottom = vv ? vv.offsetTop + vv.height : window.innerHeight;
   const top = bottom - suggestBar.offsetHeight;
-  suggestBar.style.top = `${top}px`;
-  if (suggestInput) {
+  suggestBar.style.transform = `translate3d(0, ${top}px, 0)`;
+  if (keepVisible && suggestInput) {
     const r = suggestInput.getBoundingClientRect();
     if (r.bottom > top - 8) window.scrollBy(0, r.bottom - top + 16);
   }
 }
 if (window.visualViewport) {
-  visualViewport.addEventListener('resize', () => requestAnimationFrame(placeSuggestBar));
-  visualViewport.addEventListener('scroll', () => requestAnimationFrame(placeSuggestBar));
+  // Beim Scrollen nur mitziehen, sofort und ohne die Seite zu verschieben (sonst zittert die Leiste)
+  visualViewport.addEventListener('resize', () => placeSuggestBar());
+  visualViewport.addEventListener('scroll', () => placeSuggestBar(false));
 }
 
 /** Vorschlag übernehmen: Baustelle ersetzt und schließt, Art der Arbeit hängt mit Komma an */
