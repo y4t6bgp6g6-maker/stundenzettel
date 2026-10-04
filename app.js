@@ -83,6 +83,11 @@ const endBeforeStart = (r) => r.start != null && r.end != null && r.end < r.star
 /** Feld der Zeile fehlt, sobald am Tag etwas eingetragen ist */
 const fieldMissing = (d, r, field) =>
   dayStarted(d) && (field === 'start' || field === 'end' ? r[field] == null : !String(r[field] || '').trim());
+/** Tag hat irgendwo ein Warnzeichen (fehlende Angabe, Pause, Reihenfolge, Ende vor Beginn) */
+const dayHasWarning = (d) =>
+  !d.status &&
+  (pauseMissing(d) || d.rows.some((r) => timeWarning(d, r) || fieldMissing(d, r, 'site') || fieldMissing(d, r, 'work')));
+const sheetHasWarning = (s) => sheetActiveDays(s).some((i) => dayHasWarning(s.days[i]));
 const timeWarning = (d, r) =>
   fieldMissing(d, r, 'start') || fieldMissing(d, r, 'end') || endBeforeStart(r) || rowsOutOfOrder(d).has(r.id);
 /** Mindestanzahl Zeilen im PDF: Mo–Fr 5, Sa/So 1 */
@@ -566,7 +571,7 @@ function listRowHTML(s, hit) {
       <a class="list-row" href="#/zettel/${encodeURIComponent(s.id)}">
         <span class="status ${sent ? 'sent' : 'open'}">${sent ? ICON.check : ''}</span>
         <span class="list-main">
-          <span class="list-title">${fmtShort(sheetFirstDate(s))} – ${fmtShort(sheetLastDate(s))}</span>
+          <span class="list-title">${fmtShort(sheetFirstDate(s))} – ${fmtShort(sheetLastDate(s))}${sheetHasWarning(s) ? ' <span class="list-warn">⚠️</span>' : ''}</span>
           <span class="list-sub">KW ${isoWeek(parseDate(s.weekStart))} · ${sent ? 'gesendet' : 'offen'}</span>
           ${hit ? `<span class="list-hit">${escapeHtml(hit.label)}</span>` : ''}
         </span>
@@ -623,7 +628,7 @@ function dayBarHTML(s) {
       const total = dayTotal(d);
       const cls = ['db-day', sameDay(sheetDate(s, i), today) ? 'today' : '', d.status ? `status-${d.status} has-status` : ''].join(' ');
       return `<button class="${cls}" data-act="jump" data-day="${i}">
-        <span class="db-name">${WEEKDAYS_SHORT[i]}</span>
+        <span class="db-name">${WEEKDAYS_SHORT[i]}${dayHasWarning(d) ? '<span class="db-warn">⚠️</span>' : ''}</span>
         <span class="db-h">${d.status ? DAY_STATUS_SHORT[d.status].slice(0, 2) + '.' : total ? fmtTiny(total) : '–'}</span>
       </button>`;
     })
@@ -768,6 +773,8 @@ function updateDayWarnings(dayEl, day) {
   }
   const pill = dayEl.querySelector('[data-act="pause"]');
   if (pill && day.pause == null) pill.textContent = `Pause${pauseMissing(day) ? ' ⚠️' : ''}`;
+  const bar = document.getElementById('daybar');
+  if (bar) bar.innerHTML = dayBarHTML(currentSheet());
 }
 
 /** Zum Tag scrollen, ohne dass er unter der festen Kopfzeile verschwindet */
