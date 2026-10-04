@@ -757,10 +757,13 @@ button.nav-title { font-size: 17px; padding: 8px 4px; }
   font: inherit;
   font-size: 16px;
   line-height: 1.35;
-  padding: 6px 0;
+  padding: 6px 0 6px 22px;
   resize: none;
   overflow: hidden;
 }
+.trip-field { position: relative; }
+.trip-field .field-icon { top: 9px; }
+.trip-field:focus-within .field-icon { color: var(--accent); }
 .trip-text:focus { border-bottom-color: var(--accent); }
 .trip-text::placeholder { color: var(--muted); opacity: 0.7; }
 .trip-ditto { font-size: 13px; margin: 6px 0 0; }
