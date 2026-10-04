@@ -337,25 +337,26 @@ function buildTravelPdf(t) {
   const sumTop = blockTop - 4 * sumRowH - 6;
   const bodyTop = tableTop + headerH;
 
-  // Zeilen je Tag: mindestens zwei (Beginn / Ende), mehr bei langem Reiseanlass
+  // Wie im Formular: doppelt hohe Zeilen; nur „Beginn/Ende“ und „Reiseanlass“ sind in zwei halbe Zeilen geteilt.
+  // Ein Tag belegt eine Doppelzeile, bei langem Reiseanlass entsprechend mehr. Darunter eine ungeteilte Schlusszeile.
   let fs = 9;
   const layout = (size) =>
     t.rows.map((r) => {
       const lines = r.ditto ? ['"'] : wrapLines(r.text, colW(2) - 8, size);
-      return { r, lines, n: Math.max(2, lines.length) };
+      return { r, lines, pairs: Math.max(1, Math.ceil(lines.length / 2)) };
     });
-  let blocks = layout(fs);
-  let used = blocks.reduce((a, b) => a + b.n, 0);
-  let rowCount = Math.max(14, used) + 1; // + Summenzeile
-  let rowH = (sumTop - bodyTop) / rowCount;
-  while (rowH < fs * 1.25 && fs > 5) {
-    fs -= 0.5;
+  let blocks;
+  let pairCount;
+  let rowH;
+  for (;;) {
     blocks = layout(fs);
-    used = blocks.reduce((a, b) => a + b.n, 0);
-    rowCount = Math.max(14, used) + 1;
-    rowH = (sumTop - bodyTop) / rowCount;
+    pairCount = Math.max(7, blocks.reduce((a, b) => a + b.pairs, 0)) + 1;
+    rowH = (sumTop - bodyTop) / (pairCount * 2);
+    if (rowH >= fs * 1.25 || fs <= 5) break;
+    fs -= 0.5;
   }
-  const bodyBottom = bodyTop + rowCount * rowH;
+  const pairH = 2 * rowH;
+  const bodyBottom = bodyTop + pairCount * pairH;
 
   headers.forEach((h, c) => {
     const lines = h.split('\n');
@@ -365,30 +366,33 @@ function buildTravelPdf(t) {
   });
 
   // Einträge
-  const cell = (c, row, text, align = 'right', bold = false) => {
+  const cell = (c, y, h, text, align = 'right') => {
     const padX = c === 3 ? 1.5 : 4; // schmale Spalte „Std.“
-    doc.textBox(text, xs[c] + padX, bodyTop + row * rowH, colW(c) - 2 * padX, rowH, fs, bold, align);
+    doc.textBox(text, xs[c] + padX, y, colW(c) - 2 * padX, h, fs, false, align);
   };
-  let row = 0;
-  for (const { r, lines, n } of blocks) {
-    cell(0, row, `${pad(r.date.getDate())}.`, 'left');
-    cell(0, row + 1, `${pad(r.date.getMonth() + 1)}.`, 'left');
-    if (r.start != null) cell(1, row, clock(r.start), 'center');
-    if (r.end != null) cell(1, row + 1, clock(r.end), 'center');
-    lines.forEach((l, i) => cell(2, row + i, l, r.ditto ? 'center' : 'left'));
-    if (r.minutes != null) cell(3, row + 1, hours(r.minutes), 'center');
+  let pair = 0;
+  for (const { r, lines, pairs } of blocks) {
+    const y = bodyTop + pair * pairH;
+    cell(0, y, pairH, fmtDayMonth(r.date), 'center');
+    if (r.start != null) cell(1, y, rowH, clock(r.start), 'center');
+    if (r.end != null) cell(1, y + rowH, rowH, clock(r.end), 'center');
+    lines.forEach((l, i) => cell(2, y + i * rowH, rowH, l, r.ditto ? 'center' : 'left'));
+    if (r.minutes != null) cell(3, y, pairH, hours(r.minutes), 'center');
     if (r.meal) {
-      cell(4, row + 1, money(r.meal));
-      cell(9, row + 1, money(r.meal));
+      cell(4, y, pairH, money(r.meal));
+      cell(9, y, pairH, money(r.meal));
     }
-    row += n;
+    pair += pairs;
   }
-  cell(9, rowCount - 1, money(t.total), 'right', true);
 
   // Tabellenlinien
   doc.line(L, tableTop, R, tableTop, 0.9, 0);
   doc.line(L, bodyTop, R, bodyTop, 0.9, 0);
-  for (let i = 1; i < rowCount; i++) doc.line(L, bodyTop + i * rowH, R, bodyTop + i * rowH, 0.35, 0.45);
+  for (let i = 0; i < pairCount; i++) {
+    const y = bodyTop + i * pairH;
+    if (i > 0) doc.line(L, y, R, y, 0.5, 0.35);
+    if (i < pairCount - 1) doc.line(xs[1], y + rowH, xs[3], y + rowH, 0.35, 0.55);
+  }
   doc.line(L, bodyBottom, R, bodyBottom, 1.6, 0);
   xs.forEach((x, c) => doc.line(x, tableTop, x, bodyBottom, c === 9 || c === 10 ? 1.2 : 0.6, 0));
 
