@@ -1370,6 +1370,44 @@ function signatureSVG(sig, height = 44) {
   return `<svg class="sig-preview" viewBox="0 0 100 ${(ratio * 100).toFixed(1)}" height="${height}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
 }
 
+// Unterschrift als Text über die Zwischenablage weitergeben (z. B. iPad → iPhone mit gleicher Apple-ID)
+const SIG_PREFIX = 'Stundenzettel-Unterschrift:';
+
+function copySignature() {
+  const text = SIG_PREFIX + JSON.stringify(settings.signature);
+  // direkt im Antippen: Safari erlaubt die Zwischenablage nur dort
+  navigator.clipboard.writeText(text).then(
+    () => toast('Unterschrift kopiert – jetzt auf dem iPhone einsetzen', 3500),
+    () => toast('Kopieren hat nicht geklappt')
+  );
+}
+
+function pasteSignature() {
+  if (!navigator.clipboard || !navigator.clipboard.readText) return toast('Einsetzen geht hier leider nicht');
+  navigator.clipboard.readText().then(
+    (text) => {
+      let sig = null;
+      try {
+        const t = text.trim();
+        if (t.startsWith(SIG_PREFIX)) sig = JSON.parse(t.slice(SIG_PREFIX.length));
+      } catch {}
+      const valid =
+        sig && typeof sig.ratio === 'number' && Array.isArray(sig.strokes) && sig.strokes.length &&
+        sig.strokes.every((st) => Array.isArray(st) && st.every((p) => Array.isArray(p) && p.length === 2 && p.every(Number.isFinite)));
+      if (!valid) return toast('In der Zwischenablage ist keine Unterschrift. Zuerst auf dem anderen Gerät „Unterschrift kopieren“.', 4500);
+      const apply = () => {
+        settings.signature = sig;
+        saveSettings();
+        renderSettings();
+        toast('Unterschrift übernommen');
+      };
+      if (settings.signature) confirmDialog('Unterschrift ersetzen?', 'Die bisherige Unterschrift auf diesem Gerät wird ersetzt.', 'Ersetzen', apply);
+      else apply();
+    },
+    () => toast('Einsetzen wurde nicht erlaubt')
+  );
+}
+
 function signaturePad() {
   const modal = openModal(
     `${modalHead('Unterschrift')}
@@ -1496,11 +1534,15 @@ function renderSettings() {
         settings.signature
           ? `<div class="field sig-field"><span>Unterschrift</span>${signatureSVG(settings.signature)}</div>
       <button class="list-btn" data-act="sign">Neu unterschreiben …</button>
+      <button class="list-btn" data-act="sign-copy">Unterschrift kopieren</button>
+      <button class="list-btn" data-act="sign-paste">Unterschrift einsetzen</button>
       <button class="list-btn destructive" data-act="sign-clear">Unterschrift löschen</button>`
-          : `<button class="list-btn" data-act="sign">Unterschrift hinzufügen …</button>`
+          : `<button class="list-btn" data-act="sign">Unterschrift hinzufügen …</button>
+      <button class="list-btn" data-act="sign-paste">Unterschrift einsetzen</button>`
       }
     </div>
     <p class="footnote">Ort und Unterschrift stehen unten auf der Reisekostenabrechnung. Ohne Unterschrift bleibt das Feld leer.</p>
+    <p class="footnote">Vom iPad aufs iPhone: Auf dem iPad „Unterschrift kopieren“, dann auf dem iPhone „Unterschrift einsetzen“ (gleiche Apple-ID).</p>
 
     <h2 class="section-title">Datensicherung</h2>
     <div class="card list">
@@ -2003,6 +2045,12 @@ document.addEventListener('click', (e) => {
       break;
     case 'sign':
       signaturePad();
+      break;
+    case 'sign-copy':
+      copySignature();
+      break;
+    case 'sign-paste':
+      pasteSignature();
       break;
     case 'sign-clear':
       confirmDialog('Unterschrift löschen?', 'Neue Abrechnungen haben dann keine Unterschrift.', 'Löschen', () => {
