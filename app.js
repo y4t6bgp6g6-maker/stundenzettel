@@ -45,7 +45,7 @@ const escapeHtml = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 // ───────────────────────── Datenmodell ─────────────────────────
-// Zettel: { id, weekStart: 'YYYY-MM-DD' (Montag), year, month, name, days[7], sentAt, createdAt }
+// Zettel: { id, weekStart: 'YYYY-MM-DD' (Montag), year, month, name, days[7], sentAt, createdAt, updatedAt }
 // Tag:    { pause: Minuten, status?: 'krank'|'urlaub'|'feiertag'|'frei', rows: [{ id, start, end, site, work }] }
 //         (start/end: Minuten seit 00:00; bei gesetztem status werden die Zeilen ignoriert, bleiben aber erhalten)
 
@@ -80,6 +80,7 @@ function newSheet(anchor, name) {
     days: WEEKDAYS.map(() => ({ pause: 0, rows: [emptyRow()] })),
     sentAt: null,
     createdAt: Date.now(),
+    updatedAt: Date.now(),
   };
 }
 
@@ -214,7 +215,9 @@ function sheetProblems(s) {
   return problems;
 }
 
-function saveSheets() {
+/** Speichert alle Zettel; ein geänderter Zettel bekommt den Zeitstempel „zuletzt geändert“. */
+function saveSheets(changed) {
+  if (changed) changed.updatedAt = Date.now();
   try {
     localStorage.setItem(STORE_KEY, JSON.stringify(sheets));
   } catch {
@@ -493,11 +496,11 @@ function dayHTML(s, i) {
 }
 
 function chooseStatus(btn) {
-  const { dayIndex, day } = rowContext(btn);
+  const { s, dayIndex, day } = rowContext(btn);
   const set = (status) => {
     if (status) day.status = status;
     else delete day.status;
-    saveSheets();
+    saveSheets(s);
     refreshDay(dayIndex);
   };
   actionSheet([
@@ -587,19 +590,19 @@ function editTime(btn) {
       const next = day.rows[rowIndex + 1];
       if (next && next.start == null) next.start = value;
     }
-    saveSheets();
+    saveSheets(s);
     refreshDay(dayIndex);
   });
   return s;
 }
 
 function editPause(btn) {
-  const { dayIndex, day } = rowContext(btn);
+  const { s, dayIndex, day } = rowContext(btn);
   const step = settings.minuteStep;
   const values = Array.from({ length: 240 / step + 1 }, (_, i) => i * step);
   wheelPicker('Pause', [{ values, label: (v) => `${fmtH(v)}` }], [day.pause], ([v]) => {
     day.pause = v;
-    saveSheets();
+    saveSheets(s);
     refreshDay(dayIndex);
   });
 }
@@ -616,7 +619,7 @@ function changeWeek() {
     s.year = n.year;
     s.month = n.month;
     markHolidays(s);
-    saveSheets();
+    saveSheets(s);
     refreshAll();
   });
 }
@@ -626,8 +629,8 @@ function moreMenu() {
   actionSheet([
     { label: 'Als PDF senden', run: () => sendWithCheck(s) },
     s.sentAt
-      ? { label: 'Als offen markieren', run: () => { s.sentAt = null; saveSheets(); toast('Als offen markiert'); } }
-      : { label: 'Als gesendet markieren', run: () => { s.sentAt = Date.now(); saveSheets(); toast('Als gesendet markiert'); } },
+      ? { label: 'Als offen markieren', run: () => { s.sentAt = null; saveSheets(s); toast('Als offen markiert'); } }
+      : { label: 'Als gesendet markieren', run: () => { s.sentAt = Date.now(); saveSheets(s); toast('Als gesendet markiert'); } },
     { label: 'Stundenzettel löschen', destructive: true, run: () => askDelete(s.id, true) },
   ]);
 }
@@ -704,7 +707,7 @@ async function sharePdf(s, isSend) {
   if (isSend && !s.sentAt) {
     confirmDialog('Wurde der Stundenzettel gesendet?', 'Dann wird er in der Liste mit einem Haken markiert.', 'Ja, gesendet', () => {
       s.sentAt = Date.now();
-      saveSheets();
+      saveSheets(s);
     });
   }
 }
@@ -767,7 +770,7 @@ function renderSettings() {
       <button class="list-btn" data-act="backup-export">Sicherung speichern …</button>
       <label class="list-btn">Sicherung einlesen …<input type="file" accept="application/json,.json" data-act-change="backup-import" hidden></label>
     </div>
-    <p class="footnote">Die Stundenzettel sind nur auf diesem iPhone gespeichert. Speichere ab und zu eine Sicherung in „Dateien“ / iCloud Drive. Beim Einlesen werden vorhandene Zettel ergänzt, nichts wird gelöscht.</p>
+    <p class="footnote">Die Stundenzettel sind nur auf diesem iPhone gespeichert. Speichere ab und zu eine Sicherung in „Dateien“ / iCloud Drive. Beim Einlesen kommen fehlende Zettel dazu. Gibt es einen Zettel schon, bleibt die zuletzt geänderte Fassung. Gelöscht wird nichts.</p>
     <p class="footnote center muted">${sheets.length} Stundenzettel gespeichert</p>`;
 }
 
@@ -791,26 +794,34 @@ async function importBackup(input) {
     const data = JSON.parse(await file.text());
     const incoming = Array.isArray(data) ? data : data.sheets;
     if (!Array.isArray(incoming) || !incoming.every((s) => s && s.id && s.weekStart && Array.isArray(s.days))) throw new Error('format');
-    // Gleicher Zettel (ID) wird ersetzt; eine Woche, die es in der App schon gibt, bleibt unverändert.
+    // Gleicher Zettel (ID): die zuletzt geänderte Fassung gewinnt, ohne Zeitstempel bleibt die in der App.
+    // Eine Woche, die es in der App schon als anderen Zettel gibt, bleibt unverändert.
     const weekKey = (s) => `${s.weekStart}|${s.year}|${s.month}`;
     const byId = new Map(sheets.map((s) => [s.id, s]));
     const weeks = new Map(sheets.map((s) => [weekKey(s), s.id]));
     let added = 0;
+    let updated = 0;
     let skipped = 0;
     for (const s of incoming) {
       const owner = weeks.get(weekKey(s));
-      if (owner && owner !== s.id) {
+      const current = byId.get(s.id);
+      if ((owner && owner !== s.id) || (current && !((s.updatedAt || 0) > (current.updatedAt || 0)))) {
         skipped++;
         continue;
       }
+      if (current) weeks.delete(weekKey(current));
       byId.set(s.id, s);
       weeks.set(weekKey(s), s.id);
-      added++;
+      if (current) updated++;
+      else added++;
     }
     sheets = [...byId.values()];
     saveSheets();
     renderSettings();
-    toast(`${added} Stundenzettel eingelesen${skipped ? `, ${skipped} übersprungen (Woche schon vorhanden)` : ''}`, 4000);
+    const parts = [`${added} Stundenzettel neu`];
+    if (updated) parts.push(`${updated} aktualisiert`);
+    if (skipped) parts.push(`${skipped} übersprungen (schon vorhanden oder neuer in der App)`);
+    toast(parts.join(', '), 4000);
   } catch {
     toast('Diese Datei ist keine gültige Sicherung');
   }
@@ -1092,21 +1103,21 @@ document.addEventListener('click', (e) => {
       chooseStatus(el);
       break;
     case 'addrow': {
-      const { dayIndex, day } = rowContext(el);
+      const { s, dayIndex, day } = rowContext(el);
       // Neue Zeile beginnt dort, wo die vorherige geendet hat
       const row = emptyRow();
       const prev = day.rows.at(-1);
       if (prev && prev.end != null) row.start = prev.end;
       day.rows.push(row);
-      saveSheets();
+      saveSheets(s);
       refreshDay(dayIndex);
       break;
     }
     case 'delrow': {
-      const { dayIndex, day, rowIndex, row } = rowContext(el);
+      const { s, dayIndex, day, rowIndex, row } = rowContext(el);
       const remove = () => {
         day.rows.splice(rowIndex, 1);
-        saveSheets();
+        saveSheets(s);
         refreshDay(dayIndex);
       };
       if (rowIsEmpty(row)) remove();
@@ -1146,7 +1157,7 @@ document.addEventListener('input', (e) => {
       }
       showChips(t);
     }
-    saveSheets();
+    saveSheets(s);
   } else if (t.dataset.s) {
     const key = t.dataset.s;
     if (key === 'overtime') {
