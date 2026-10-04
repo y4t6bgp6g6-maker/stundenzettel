@@ -1229,7 +1229,16 @@ function renderTrip(id) {
       </span>
     </header>
     <div id="trip-body">${tripBodyHTML(t)}</div>`;
+  fitTripTexts();
 }
+
+/** Textfelder so hoch wie ihr Text (auch nach dem Öffnen und beim Drehen des Geräts) */
+function fitTripTexts() {
+  const fit = () => document.querySelectorAll('.trip-text').forEach(fitTextarea);
+  fit();
+  requestAnimationFrame(fit);
+}
+window.addEventListener('resize', () => currentView === 'trip' && fitTripTexts());
 
 function tripBodyHTML(t) {
   const rows = tripRows(t);
@@ -1302,12 +1311,13 @@ function refreshTrip() {
   if (!t || !body) return;
   const y = window.scrollY;
   body.innerHTML = tripBodyHTML(t);
+  fitTripTexts();
   window.scrollTo(0, y);
-  document.querySelectorAll('.trip-text').forEach(fitTextarea);
 }
 const fitTextarea = (el) => {
   el.style.height = 'auto';
-  el.style.height = `${el.scrollHeight}px`;
+  // + Rahmen (Linie unten), weil die Höhe den Rahmen mit einschließt
+  el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
 };
 
 function setTripOver(t, iso, key, value) {
