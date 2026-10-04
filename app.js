@@ -615,11 +615,11 @@ function renderStats() {
     ${settings.overtime && sheets.length ? `<p class="footnote">Überstunden: Pro Werktag zählt alles über ${fmtH(Math.round((settings.target * 60) / 5))}. Nur Tage mit Stundenzettel zählen. Plus und Minus werden verrechnet.</p>` : ''}`;
 }
 
-/** Reisekosten je Jahr: Reisetage, Spesen und offene Abrechnungen (nach dem Datum der Tage bzw. des ersten Tages) */
+/** Reisekosten je Jahr: Tage auf Montage und Spesen (nach dem Datum der Tage) */
 function tripYearStats() {
   const years = new Map();
   const get = (y) => {
-    if (!years.has(y)) years.set(y, { days: 0, sum: 0, open: 0 });
+    if (!years.has(y)) years.set(y, { days: 0, sum: 0 });
     return years.get(y);
   };
   for (const t of trips) {
@@ -629,16 +629,14 @@ function tripYearStats() {
       st.days++;
       st.sum += r.meal;
     }
-    if (!t.sentAt) get(tripFirstDate(t).getFullYear()).open++;
   }
   return years;
 }
 
 function tripYearHTML(st) {
   return `<a class="card form trip-year" href="#/reisekosten">
-    <div class="field"><span>Reisetage</span><b>${fmtDays(st.days)}</b></div>
+    <div class="field"><span>Tage auf Montage</span><b>${fmtDays(st.days)}</b></div>
     <div class="field"><span>Spesen</span><b>${fmtEuro(st.sum)}</b></div>
-    <div class="field"><span>Offene Abrechnungen</span><b class="${st.open ? 'open-count' : ''}">${st.open}</b></div>
   </a>`;
 }
 
