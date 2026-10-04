@@ -116,8 +116,7 @@ const DEFAULT_SETTINGS = {
   hourFormat: 'dec',
   state: 'NI',
   credit: { krank: true, urlaub: true, feiertag: true, frei: false },
-  dayBar: true,
-  prorateTarget: true,
+  prorateTarget: false,
 };
 
 function readJson(key, fallback) {
@@ -135,6 +134,7 @@ settings.credit = { ...DEFAULT_SETTINGS.credit, ...settings.credit };
 delete settings.recipient; // frühere Einstellungen, werden nicht mehr verwendet
 delete settings.pdfFrame;
 delete settings.accountStart;
+delete settings.dayBar;
 
 /** Urlaubs- und Krankheitstage je Jahr (nach Datum des Tages) */
 function absenceStats() {
@@ -317,8 +317,12 @@ function route() {
     currentView = 'list';
     renderList();
     if (pendingMonth) {
-      scrollToMonth(pendingMonth);
+      const key = pendingMonth;
       pendingMonth = null;
+      scrollToMonth(key);
+      // iOS setzt die Scroll-Position nach dem Seitenwechsel teils noch einmal zurück
+      requestAnimationFrame(() => scrollToMonth(key));
+      setTimeout(() => scrollToMonth(key), 120);
     } else {
       window.scrollTo(0, listScroll);
     }
@@ -562,7 +566,7 @@ function renderEditor(id) {
       <button class="nav-btn back" data-act="back">${ICON.back}<span>Zettel</span></button>
       <button class="nav-title" data-act="week" id="nav-title">${fmtShort(sheetFirstDate(s))} – ${fmtShort(sheetLastDate(s))}</button>
       <button class="nav-btn" data-act="more" aria-label="Weitere Aktionen">${ICON.more}</button>
-      ${settings.dayBar ? `<div class="daybar" id="daybar">${dayBarHTML(s)}</div>` : ''}
+      <div class="daybar" id="daybar">${dayBarHTML(s)}</div>
     </header>
     <div id="days">${daysHTML(s)}</div>
     <div class="card summary" id="summary">${summaryHTML(s)}</div>`;
@@ -574,7 +578,7 @@ const fmtTiny = (min) =>
     ? `${Math.floor(min / 60)}:${pad(min % 60)}`
     : String(Math.round((min / 60) * 100) / 100).replace('.', ',');
 
-/** Tagesleiste: Mo–So mit Stunden, heute markiert, rechts die Wochensumme */
+/** Tagesleiste: Mo–So mit Stunden, heute markiert */
 function dayBarHTML(s) {
   const today = new Date();
   return `${s.days
@@ -587,7 +591,7 @@ function dayBarHTML(s) {
         <span class="db-h">${d.status ? DAY_STATUS_SHORT[d.status].slice(0, 2) + '.' : total ? fmtTiny(total) : '–'}</span>
       </button>`;
     })
-    .join('')}<span class="db-day db-sum"><span class="db-name">Woche</span><span class="db-h">${fmtTiny(sheetTotal(s))}</span></span>`;
+    .join('')}`;
 }
 
 /** Alle Tage; zusammenhängende Tage des anderen Monats werden zu einer schmalen Zeile */
@@ -695,7 +699,7 @@ function summaryHTML(s) {
   let html = `<div class="sum-row"><span>Stunden Gesamt</span><b>${fmtH(sheetTotal(s))}</b></div>`;
   if (settings.overtime) {
     const target = sheetTarget(s);
-    html += `<div class="sum-row"><span>Überstunden <span class="muted">(Soll ${fmtH(Math.round(target * 60))})</span></span><b>${fmtH(sheetOvertime(s, target))}</b></div>`;
+    html += `<div class="sum-row"><span>Überstunden <span class="muted">(ab ${fmtH(Math.round(target * 60))})</span></span><b>${fmtH(sheetOvertime(s, target))}</b></div>`;
   }
   return html;
 }
@@ -794,21 +798,11 @@ function moreMenu() {
   const s = currentSheet();
   actionSheet([
     { label: 'Als PDF senden', run: () => sendWithCheck(s) },
-    { label: 'Woche ändern', run: () => changeWeek() },
-    { label: `Name ändern${s.name.trim() ? ` (${escapeHtml(s.name.trim())})` : ''}`, run: () => editName(s) },
     s.sentAt
       ? { label: 'Als offen markieren', run: () => { s.sentAt = null; saveSheets(s); toast('Als offen markiert'); } }
       : { label: 'Als gesendet markieren', run: () => { s.sentAt = Date.now(); saveSheets(s); toast('Als gesendet markiert'); } },
     { label: 'Stundenzettel löschen', destructive: true, run: () => askDelete(s.id, true) },
   ]);
-}
-
-function editName(s) {
-  promptDialog('Name auf diesem Zettel', s.name, 'Vor- und Nachname', (value) => {
-    s.name = value.trim();
-    saveSheets(s);
-    toast('Name geändert');
-  });
 }
 
 function sendWithCheck(s) {
@@ -915,17 +909,16 @@ function renderSettings() {
           <option value="dec" ${settings.hourFormat !== 'hm' ? 'selected' : ''}>Dezimal (8,50)</option>
           <option value="hm" ${settings.hourFormat === 'hm' ? 'selected' : ''}>Stunden/Min. (8h 30m)</option>
         </select></label>
-      <label class="field toggle-field"><span>Tagesleiste im Zettel</span><input type="checkbox" class="toggle" data-s="dayBar" ${settings.dayBar ? 'checked' : ''}></label>
     </div>
-    <p class="footnote">Die Zeitschritte gelten für Arbeitsbeginn, Arbeitsende und Pause. Das Stundenformat gilt für Stunden, Pause und Summen in der App und im PDF. Die Tagesleiste zeigt oben im Zettel die Stunden je Tag; ein Tipp springt zum Tag.</p>
+    <p class="footnote">Die Zeitschritte gelten für Arbeitsbeginn, Arbeitsende und Pause. Das Stundenformat gilt für Stunden, Pause und Summen in der App und im PDF.</p>
 
     <h2 class="section-title">Überstunden</h2>
     <div class="card form">
       <label class="field toggle-field"><span>Überstunden berechnen</span><input type="checkbox" class="toggle" data-s="overtime" ${settings.overtime ? 'checked' : ''}></label>
-      <label class="field ${settings.overtime ? '' : 'disabled'}" id="target-field"><span>Soll pro Woche (h)</span><input data-s="target" type="text" inputmode="decimal" value="${String(settings.target).replace('.', ',')}" ${settings.overtime ? '' : 'disabled'} enterkeyhint="done"></label>
-      <label class="field toggle-field ${settings.overtime ? '' : 'disabled'}" id="prorate-field"><span>Soll bei Teilwochen anteilig</span><input type="checkbox" class="toggle" data-s="prorateTarget" ${settings.prorateTarget ? 'checked' : ''} ${settings.overtime ? '' : 'disabled'}></label>
+      <label class="field ${settings.overtime ? '' : 'disabled'}" id="target-field"><span>Überstunden ab (h pro Woche)</span><input data-s="target" type="text" inputmode="decimal" value="${String(settings.target).replace('.', ',')}" ${settings.overtime ? '' : 'disabled'} enterkeyhint="done"></label>
+      <label class="field toggle-field ${settings.overtime ? '' : 'disabled'}" id="prorate-field"><span>Überstunden bei Teilwochen anteilig</span><input type="checkbox" class="toggle" data-s="prorateTarget" ${settings.prorateTarget ? 'checked' : ''} ${settings.overtime ? '' : 'disabled'}></label>
     </div>
-    <p class="footnote">Auf dem Wochenzettel: Überstunden = Stunden Gesamt − Soll, weniger als das Soll zählt als 0. Liegt eine Woche in zwei Monaten, gilt bei „anteilig“ nur das Soll der Werktage Mo–Fr dieses Zettels (z. B. 3 Werktage = 24 h), sonst das volle Wochen-Soll. Das Überstunden-Konto in der Übersicht rechnet monatlich Tag für Tag und verrechnet Plus- und Minusstunden. Tage ohne Stundenzettel zählen nicht mit.</p>
+    <p class="footnote">Auf dem Wochenzettel zählt als Überstunde, was über diese Stundenzahl hinausgeht. Liegt eine Woche in zwei Monaten, zählen bei „anteilig“ nur die Werktage Mo–Fr dieses Zettels (z. B. 3 Werktage = Überstunden ab 24 h), sonst gilt die volle Wochenzahl. Das Überstunden-Konto in der Übersicht rechnet monatlich Tag für Tag und verrechnet Plus- und Minusstunden. Tage ohne Stundenzettel zählen nicht mit.</p>
 
     <h2 class="section-title">Krankheit, Urlaub, Feiertage</h2>
     <div class="card form">
@@ -1217,34 +1210,6 @@ function confirmDialog(title, message, okLabel, onOk, destructive = false, cance
   });
 }
 
-function promptDialog(title, value, placeholder, onOk) {
-  const modal = openModal(
-    `<div class="alert-body"><b>${title}</b><input class="alert-input" value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}" autocomplete="off" enterkeyhint="done"></div>
-    <div class="alert-buttons">
-      <button data-c="no">Abbrechen</button>
-      <button data-c="yes" class="strong">Sichern</button>
-    </div>`,
-    'alert'
-  );
-  const input = modal.querySelector('input');
-  input.focus();
-  const finish = (ok) => {
-    closeModal();
-    if (ok) onOk(input.value);
-  };
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      e.stopPropagation();
-      finish(true);
-    }
-  });
-  modal.addEventListener('click', (e) => {
-    const b = e.target.closest('[data-c]');
-    if (b) finish(b.dataset.c === 'yes');
-  });
-}
-
 let toastTimer = 0;
 function toast(text, ms = 2200) {
   const el = document.getElementById('toast');
@@ -1349,7 +1314,7 @@ document.addEventListener('click', (e) => {
       break;
     case 'goto-month':
       pendingMonth = Number(el.dataset.month);
-      goBack();
+      location.replace('#/');
       break;
     case 'jump':
       jumpToDay(Number(el.dataset.day));
@@ -1421,7 +1386,7 @@ document.addEventListener('input', (e) => {
       if (!Number.isNaN(v) && v >= 0) settings[key] = v;
     } else if (key === 'minuteStep') {
       settings.minuteStep = Number(t.value);
-    } else if (key === 'dayBar' || key === 'prorateTarget') {
+    } else if (key === 'prorateTarget') {
       settings[key] = t.checked;
     } else if (key.startsWith('credit.')) {
       settings.credit[key.slice(7)] = t.checked;
@@ -1453,6 +1418,7 @@ document.addEventListener('keydown', (e) => {
 
 // ───────────────────────── Start ─────────────────────────
 
+if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
 history.replaceState('root', '', location.hash || '#/');
 route();
 
