@@ -69,22 +69,22 @@ const dayHasTimes = (d) => d.rows.some((r) => r.start != null || r.end != null);
 const pauseMissing = (d) => !d.status && d.pause == null && d.rows.some((r) => !rowIsEmpty(r));
 /** Am Tag wurde schon etwas eingetragen (Zeit, Baustelle, Art der Arbeit oder eine Pause) */
 const dayStarted = (d) => !d.status && (d.pause > 0 || d.rows.some((r) => !rowIsEmpty(r)));
-/** Zeilen, deren Beginn vor dem Beginn einer Zeile darüber liegt (z. B. nach dem Verschieben) */
+/** Zeilen, die zeitlich nicht zueinander passen: Beginn vor dem Beginn einer Zeile darüber – beide werden markiert */
 function rowsOutOfOrder(d) {
   const bad = new Set();
-  let latest = null;
-  for (const r of d.rows) {
-    if (r.start == null) continue;
-    if (latest != null && r.start < latest) bad.add(r.id);
-    else latest = r.start;
-  }
+  const timed = d.rows.filter((r) => r.start != null);
+  for (let a = 0; a < timed.length; a++)
+    for (let b = a + 1; b < timed.length; b++)
+      if (timed[b].start < timed[a].start) bad.add(timed[a].id).add(timed[b].id);
   return bad;
 }
+/** Ende liegt vor dem Beginn */
+const endBeforeStart = (r) => r.start != null && r.end != null && r.end < r.start;
 /** Feld der Zeile fehlt, sobald am Tag etwas eingetragen ist */
 const fieldMissing = (d, r, field) =>
   dayStarted(d) && (field === 'start' || field === 'end' ? r[field] == null : !String(r[field] || '').trim());
 const timeWarning = (d, r) =>
-  fieldMissing(d, r, 'start') || fieldMissing(d, r, 'end') || rowsOutOfOrder(d).has(r.id);
+  fieldMissing(d, r, 'start') || fieldMissing(d, r, 'end') || endBeforeStart(r) || rowsOutOfOrder(d).has(r.id);
 /** Mindestanzahl Zeilen im PDF: Mo–Fr 5, Sa/So 1 */
 const pdfMinRows = (i) => (i < 5 ? 5 : 1);
 
@@ -225,6 +225,7 @@ function sheetProblems(s) {
       ]
         .filter(([f]) => fieldMissing(d, r, f))
         .map(([, label]) => label);
+      if (endBeforeStart(r)) problems.push(`${where}: Ende ${fmtTime(r.end)} liegt vor Beginn ${fmtTime(r.start)}`);
       if (missing.length) problems.push(`${where}: ${missing.join(', ')} ${missing.length > 1 ? 'fehlen' : 'fehlt'}`);
       if (r.start != null && r.end != null && r.end > r.start) timed.push(r);
     });
