@@ -690,3 +690,20 @@ button.nav-title { font-size: 17px; padding: 8px 4px; }
   text-overflow: ellipsis;
 }
 .chip:active { background: var(--fill); }
+
+/* Warnzeichen bei den Uhrzeiten */
+.time-warn { display: none; font-size: 16px; line-height: 1; }
+.time-warn.show { display: inline; }
+
+/* Zeilen verschieben */
+.day .row { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; position: relative; background: var(--card); }
+.day .row input { -webkit-user-select: text; user-select: text; }
+.day.reordering .row:not(.dragging) { transition: none; }
+.row.dragging {
+  z-index: 5;
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
+  transform-origin: center;
+  transition: box-shadow 0.15s;
+}
+

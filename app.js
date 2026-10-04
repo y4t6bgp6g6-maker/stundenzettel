@@ -67,6 +67,24 @@ const dayTotal = (d) => (d.status ? statusCredit(d.status) : Math.max(0, dayWork
 const dayHasTimes = (d) => d.rows.some((r) => r.start != null || r.end != null);
 /** Am Tag wurde schon etwas eingetragen, aber noch keine Pause (nur neue Zettel haben pause: null) */
 const pauseMissing = (d) => !d.status && d.pause == null && d.rows.some((r) => !rowIsEmpty(r));
+/** Am Tag wurde schon etwas eingetragen (Zeit, Baustelle, Art der Arbeit oder eine Pause) */
+const dayStarted = (d) => !d.status && (d.pause > 0 || d.rows.some((r) => !rowIsEmpty(r)));
+/** Zeilen, deren Beginn vor dem Beginn einer Zeile darüber liegt (z. B. nach dem Verschieben) */
+function rowsOutOfOrder(d) {
+  const bad = new Set();
+  let latest = null;
+  for (const r of d.rows) {
+    if (r.start == null) continue;
+    if (latest != null && r.start < latest) bad.add(r.id);
+    else latest = r.start;
+  }
+  return bad;
+}
+/** Feld der Zeile fehlt, sobald am Tag etwas eingetragen ist */
+const fieldMissing = (d, r, field) =>
+  dayStarted(d) && (field === 'start' || field === 'end' ? r[field] == null : !String(r[field] || '').trim());
+const timeWarning = (d, r) =>
+  fieldMissing(d, r, 'start') || fieldMissing(d, r, 'end') || rowsOutOfOrder(d).has(r.id);
 /** Mindestanzahl Zeilen im PDF: Mo–Fr 5, Sa/So 1 */
 const pdfMinRows = (i) => (i < 5 ? 5 : 1);
 
@@ -197,16 +215,20 @@ function sheetProblems(s) {
     if (!sheetIsActive(s, i) || d.status) return;
     const day = WEEKDAYS[i];
     const timed = [];
-    d.rows.forEach((r) => {
-      const range = `${r.start != null ? fmtTime(r.start) : '?'}–${r.end != null ? fmtTime(r.end) : '?'}`;
-      if (r.start != null && r.end == null) problems.push(`${day}: Zeile ab ${fmtTime(r.start)} hat kein Ende`);
-      if (r.start == null && r.end != null) problems.push(`${day}: Zeile bis ${fmtTime(r.end)} hat keinen Beginn`);
-      if (r.start != null || r.end != null) {
-        if (!r.site.trim()) problems.push(`${day} ${range}: Baustelle fehlt`);
-        if (!r.work.trim()) problems.push(`${day} ${range}: Art der Arbeit fehlt`);
-      }
+    d.rows.forEach((r, k) => {
+      const where = d.rows.length > 1 ? `${day}, Zeile ${k + 1}` : day;
+      const missing = [
+        ['start', 'Beginn'],
+        ['end', 'Ende'],
+        ['site', 'Baustelle'],
+        ['work', 'Art der Arbeit'],
+      ]
+        .filter(([f]) => fieldMissing(d, r, f))
+        .map(([, label]) => label);
+      if (missing.length) problems.push(`${where}: ${missing.join(', ')} ${missing.length > 1 ? 'fehlen' : 'fehlt'}`);
       if (r.start != null && r.end != null && r.end > r.start) timed.push(r);
     });
+    if (rowsOutOfOrder(d).size) problems.push(`${day}: Zeilen nicht in zeitlicher Reihenfolge`);
     timed.sort((a, b) => a.start - b.start);
     for (let k = 1; k < timed.length; k++) {
       const a = timed[k - 1];
@@ -218,7 +240,7 @@ function sheetProblems(s) {
       }
     }
     if (pauseMissing(d)) problems.push(`${day}: Pause fehlt`);
-    if (i < 5 && !dayHasTimes(d)) problems.push(`${day}: kein Eintrag`);
+    if (i < 5 && !dayStarted(d)) problems.push(`${day}: kein Eintrag`);
   });
   return problems;
 }
@@ -660,7 +682,7 @@ function dayHTML(s, i) {
   }
   return `<section class="day" data-day="${i}">
     ${head}
-    ${day.rows.map((r) => rowHTML(r, day.rows.length)).join('')}
+    ${day.rows.map((r) => rowHTML(day, r)).join('')}
     <div class="day-foot">
       <button class="link-btn" data-act="addrow">${ICON.plus} Zeile</button>
       <button class="pill ${day.pause == null ? 'empty' : ''}" data-act="pause">Pause${day.pause == null ? '' : ` ${fmtH(day.pause)}`}${pauseMissing(day) ? ' ⚠️' : ''}</button>
@@ -686,10 +708,8 @@ function chooseStatus(btn) {
   ]);
 }
 
-/** Zeit eingetragen, aber Baustelle bzw. Art der Arbeit noch leer → Warnsymbol */
-const fieldMissing = (r, field) => (r.start != null || r.end != null) && !String(r[field] || '').trim();
-
-function rowHTML(r, rowCount) {
+function rowHTML(day, r) {
+  const rowCount = day.rows.length;
   const m = rowMinutes(r);
   const timeBtn = (which, label) => {
     const v = r[which];
@@ -700,11 +720,12 @@ function rowHTML(r, rowCount) {
       ${timeBtn('start', 'Beginn')}
       <span class="arrow">–</span>
       ${timeBtn('end', 'Ende')}
+      <span class="time-warn ${timeWarning(day, r) ? 'show' : ''}" aria-label="Zeit prüfen">⚠️</span>
       <span class="row-hours">${m == null ? '' : fmtH(m)}</span>
       ${rowCount > 1 ? `<button class="row-del" data-act="delrow" aria-label="Zeile löschen">${ICON.close}</button>` : '<span class="row-del-space"></span>'}
     </div>
-    <div class="suggest-wrap ${fieldMissing(r, 'site') ? 'missing' : ''}"><span class="field-icon">${ICON.pin}</span><span class="warn" aria-label="fehlt">⚠️</span><input class="txt" data-f="site" placeholder="Baustelle" value="${escapeHtml(r.site)}" autocomplete="off" autocapitalize="sentences" enterkeyhint="next"></div>
-    <div class="suggest-wrap ${fieldMissing(r, 'work') ? 'missing' : ''}"><span class="field-icon">${ICON.tool}</span><span class="warn" aria-label="fehlt">⚠️</span><input class="txt" data-f="work" placeholder="Art der Arbeit" value="${escapeHtml(r.work)}" autocomplete="off" autocapitalize="sentences" enterkeyhint="done"></div>
+    <div class="suggest-wrap ${fieldMissing(day, r, 'site') ? 'missing' : ''}"><span class="field-icon">${ICON.pin}</span><span class="warn" aria-label="fehlt">⚠️</span><input class="txt" data-f="site" placeholder="Baustelle" value="${escapeHtml(r.site)}" autocomplete="off" autocapitalize="sentences" enterkeyhint="next"></div>
+    <div class="suggest-wrap ${fieldMissing(day, r, 'work') ? 'missing' : ''}"><span class="field-icon">${ICON.tool}</span><span class="warn" aria-label="fehlt">⚠️</span><input class="txt" data-f="work" placeholder="Art der Arbeit" value="${escapeHtml(r.work)}" autocomplete="off" autocapitalize="sentences" enterkeyhint="done"></div>
   </div>`;
 }
 
@@ -731,6 +752,21 @@ function refreshSummary() {
   if (el) el.innerHTML = summaryHTML(s);
   const bar = document.getElementById('daybar');
   if (bar) bar.innerHTML = dayBarHTML(s);
+}
+
+/** Warnzeichen eines Tages neu setzen, ohne die Eingabefelder neu zu zeichnen (Fokus bleibt) */
+function updateDayWarnings(dayEl, day) {
+  if (!dayEl) return;
+  for (const rowEl of dayEl.querySelectorAll('.row')) {
+    const r = day.rows.find((x) => x.id === rowEl.dataset.row);
+    if (!r) continue;
+    rowEl.querySelector('.time-warn').classList.toggle('show', timeWarning(day, r));
+    for (const f of ['site', 'work']) {
+      rowEl.querySelector(`[data-f="${f}"]`).closest('.suggest-wrap').classList.toggle('missing', fieldMissing(day, r, f));
+    }
+  }
+  const pill = dayEl.querySelector('[data-act="pause"]');
+  if (pill && day.pause == null) pill.textContent = `Pause${pauseMissing(day) ? ' ⚠️' : ''}`;
 }
 
 /** Zum Tag scrollen, ohne dass er unter der festen Kopfzeile verschwindet */
@@ -1458,10 +1494,8 @@ document.addEventListener('input', (e) => {
     const { row } = rowContext(t);
     if (row) {
       row[t.dataset.f] = t.value;
-      t.closest('.suggest-wrap').classList.toggle('missing', fieldMissing(row, t.dataset.f));
       const { day } = rowContext(t);
-      const pill = t.closest('.day')?.querySelector('[data-act="pause"]');
-      if (pill && day.pause == null) pill.textContent = `Pause${pauseMissing(day) ? ' ⚠️' : ''}`;
+      updateDayWarnings(t.closest('.day'), day);
     }
     showChips(t);
     saveSheets(s);
@@ -1512,6 +1546,94 @@ document.addEventListener('keydown', (e) => {
     else e.target.blur();
     e.preventDefault();
   }
+});
+
+// ───────────────────────── Zeilen verschieben ─────────────────────────
+// Lange auf eine Zeile drücken (nicht in ein Textfeld), dann nach oben oder unten ziehen.
+
+let press = null; // { rowEl, timer, x, y }
+let drag = null; // { rowEl, dayEl, grab, moved }
+
+function startDrag() {
+  const { rowEl } = press;
+  const dayEl = rowEl.closest('.day');
+  if (!dayEl || dayEl.querySelectorAll('.row').length < 2) return;
+  document.activeElement && document.activeElement.blur && document.activeElement.blur();
+  drag = { rowEl, dayEl, grab: press.y - rowEl.getBoundingClientRect().top };
+  rowEl.classList.add('dragging');
+  dayEl.classList.add('reordering');
+}
+
+function moveDrag(y) {
+  const { rowEl, grab } = drag;
+  const prev = rowEl.previousElementSibling;
+  const next = rowEl.nextElementSibling;
+  if (prev && prev.classList.contains('row')) {
+    const r = prev.getBoundingClientRect();
+    if (y - grab < r.top + r.height / 2) prev.before(rowEl);
+  }
+  if (next && next.classList.contains('row')) {
+    const r = next.getBoundingClientRect();
+    if (y - grab + rowEl.offsetHeight > r.top + r.height / 2) next.after(rowEl);
+  }
+  rowEl.style.transform = '';
+  const natural = rowEl.getBoundingClientRect().top;
+  rowEl.style.transform = `translateY(${y - grab - natural}px)`;
+}
+
+function endDrag() {
+  const { rowEl, dayEl } = drag;
+  drag = null;
+  rowEl.classList.remove('dragging');
+  rowEl.style.transform = '';
+  dayEl.classList.remove('reordering');
+  const s = currentSheet();
+  const i = Number(dayEl.dataset.day);
+  const day = s.days[i];
+  const order = [...dayEl.querySelectorAll('.row')].map((el) => el.dataset.row);
+  const before = day.rows.map((r) => r.id).join();
+  day.rows.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+  if (day.rows.map((r) => r.id).join() !== before) saveSheets(s);
+  refreshDay(i);
+}
+
+document.addEventListener(
+  'touchstart',
+  (e) => {
+    const rowEl = e.target.closest('.day .row');
+    if (!rowEl || e.touches.length > 1 || e.target.closest('input')) return;
+    const t = e.touches[0];
+    press = { rowEl, x: t.clientX, y: t.clientY, timer: setTimeout(startDrag, 450) };
+  },
+  { passive: true }
+);
+document.addEventListener(
+  'touchmove',
+  (e) => {
+    const t = e.touches[0];
+    if (drag) {
+      e.preventDefault(); // Seite scrollt beim Ziehen nicht mit
+      moveDrag(t.clientY);
+    } else if (press && (Math.abs(t.clientX - press.x) > 8 || Math.abs(t.clientY - press.y) > 8)) {
+      clearTimeout(press.timer);
+      press = null;
+    }
+  },
+  { passive: false }
+);
+const endPress = (e) => {
+  if (press) clearTimeout(press.timer);
+  press = null;
+  if (drag) {
+    e.preventDefault(); // kein Klick auf Uhrzeit oder Löschen nach dem Loslassen
+    endDrag();
+  }
+};
+document.addEventListener('touchend', endPress, { passive: false });
+document.addEventListener('touchcancel', endPress, { passive: false });
+// Kein Kontextmenü beim langen Drücken auf eine Zeile
+document.addEventListener('contextmenu', (e) => {
+  if (e.target.closest('.day .row') && !e.target.closest('input')) e.preventDefault();
 });
 
 // ───────────────────────── Start ─────────────────────────
