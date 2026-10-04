@@ -155,6 +155,8 @@ const DEFAULT_SETTINGS = {
   prorateTarget: false,
   place: '',
   signature: null,
+  vacationDays: 0,
+  hiddenSuggestions: { site: [], work: [] },
 };
 
 function readJson(key, fallback) {
@@ -169,6 +171,7 @@ function readJson(key, fallback) {
 let sheets = readJson(STORE_KEY, []);
 let settings = { ...DEFAULT_SETTINGS, ...readJson(SETTINGS_KEY, {}) };
 settings.credit = { ...DEFAULT_SETTINGS.credit, ...settings.credit };
+settings.hiddenSuggestions = { site: [], work: [], ...settings.hiddenSuggestions };
 delete settings.recipient; // frühere Einstellungen, werden nicht mehr verwendet
 delete settings.pdfFrame;
 delete settings.accountStart;
@@ -311,7 +314,30 @@ function collectSuggestions(field) {
           if (v) counts.set(v, (counts.get(v) || 0) + 1);
         }
       }
-  return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'de')).map(([v]) => v);
+  // Ausgeblendete Vorschläge (langes Drücken in der Leiste) bleiben weg, bis sie wiederhergestellt werden
+  const hidden = new Set(settings.hiddenSuggestions[field].map((v) => v.toLowerCase()));
+  return [...counts]
+    .filter(([v]) => !hidden.has(v.toLowerCase()))
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'de'))
+    .map(([v]) => v);
+}
+
+/** Wie oft welche Art der Arbeit an welcher Baustelle eingetragen wurde: Baustelle → (Tätigkeit → Anzahl), klein geschrieben */
+function collectWorkBySite() {
+  const map = new Map();
+  for (const s of sheets)
+    for (const d of s.days)
+      for (const r of d.rows) {
+        const site = (r.site || '').trim().toLowerCase();
+        if (!site) continue;
+        if (!map.has(site)) map.set(site, new Map());
+        const works = map.get(site);
+        for (const part of (r.work || '').split(',')) {
+          const w = part.trim().toLowerCase();
+          if (w) works.set(w, (works.get(w) || 0) + 1);
+        }
+      }
+  return map;
 }
 
 // ───────────────────────── Icons ─────────────────────────
@@ -333,6 +359,7 @@ const ICON = {
   share: svg('<path d="M12 3v12M8 7l4-4 4 4"/><path d="M7 11H6a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2h-1"/>'),
   up: svg('<path d="M12 19V5M5 12l7-7 7 7"/>', 22),
   pin: svg('<path d="M12 21s-6-5.3-6-10a6 6 0 0 1 12 0c0 4.7-6 10-6 10z"/><circle cx="12" cy="11" r="2.2"/>', 15),
+  suitcaseSmall: svg('<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 13h18"/>', 16),
   suitcase: svg('<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 13h18"/>', 22),
   tool: svg('<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3.6 17.4a1.4 1.4 0 0 0 2 2l5.7-5.7a4 4 0 0 0 5.4-5.4l-2.4 2.4-2-2z"/>', 15),
 };
@@ -538,14 +565,17 @@ function updateTopButton() {
 }
 window.addEventListener('scroll', () => requestAnimationFrame(updateTopButton), { passive: true });
 
-const fmtDays = (n) => `${n} ${n === 1 ? 'Tag' : 'Tage'}`;
+const fmtNum = (n) => String(Math.round(n * 10) / 10).replace('.', ',');
+const fmtDays = (n) => `${fmtNum(n)} ${n === 1 ? 'Tag' : 'Tage'}`;
 
 function statsCardHTML() {
   const year = new Date().getFullYear();
   const st = absenceStats().get(year) || { urlaub: 0, krank: 0 };
   return `<a class="card stats-card" href="#/uebersicht">
     <span class="stats-year">${year}</span>
-    <span class="stats-item"><span class="stats-num">${st.urlaub}</span><span class="stats-label">${st.urlaub === 1 ? 'Urlaubstag' : 'Urlaubstage'}</span></span>
+    <span class="stats-item"><span class="stats-num">${st.urlaub}</span><span class="stats-label">${st.urlaub === 1 ? 'Urlaubstag' : 'Urlaubstage'}${
+      settings.vacationDays > 0 ? ` · ${fmtNum(settings.vacationDays - st.urlaub)} übrig` : ''
+    }</span></span>
     <span class="stats-item"><span class="stats-num">${st.krank}</span><span class="stats-label">${st.krank === 1 ? 'Krankheitstag' : 'Krankheitstage'}</span></span>
     <span class="list-chevron">${ICON.chevronRight}</span>
   </a>`;
@@ -559,6 +589,8 @@ function renderStats() {
   const current = new Date().getFullYear();
   if (!stats.has(current)) stats.set(current, { urlaub: 0, krank: 0 });
   account.forEach((_, y) => { if (!stats.has(y)) stats.set(y, { urlaub: 0, krank: 0 }); });
+  const travel = tripYearStats();
+  travel.forEach((_, y) => { if (!stats.has(y)) stats.set(y, { urlaub: 0, krank: 0 }); });
   const years = [...stats.keys()].sort((a, b) => b - a);
   app.innerHTML = `
     <header class="nav">
@@ -571,14 +603,43 @@ function renderStats() {
         const st = stats.get(y);
         return `<h2 class="section-title">${y}${y === current ? ' (laufendes Jahr)' : ''}</h2>
         <div class="card form">
-          <div class="field"><span>Urlaubstage</span><b>${fmtDays(st.urlaub)}</b></div>
+          <div class="field"><span>Urlaubstage</span><b>${fmtDays(st.urlaub)}${settings.vacationDays > 0 ? ` <span class="muted">von ${fmtNum(settings.vacationDays)}</span>` : ''}</b></div>
+          ${settings.vacationDays > 0 ? `<div class="field"><span>Resturlaub</span><b class="${settings.vacationDays - st.urlaub < 0 ? 'minus' : ''}">${fmtDays(settings.vacationDays - st.urlaub)}</b></div>` : ''}
           <div class="field"><span>Krankheitstage</span><b>${fmtDays(st.krank)}</b></div>
         </div>
+        ${travel.has(y) ? tripYearHTML(travel.get(y)) : ''}
         ${account.has(y) ? overtimeYearHTML(y, account.get(y)) : ''}`;
       })
       .join('')}
     <p class="footnote">Gezählt werden alle Tage, die du als Urlaub oder Krankheit markiert hast.</p>
     ${settings.overtime && sheets.length ? `<p class="footnote">Überstunden: Pro Werktag zählt alles über ${fmtH(Math.round((settings.target * 60) / 5))}. Nur Tage mit Stundenzettel zählen. Plus und Minus werden verrechnet.</p>` : ''}`;
+}
+
+/** Reisekosten je Jahr: Reisetage, Spesen und offene Abrechnungen (nach dem Datum der Tage bzw. des ersten Tages) */
+function tripYearStats() {
+  const years = new Map();
+  const get = (y) => {
+    if (!years.has(y)) years.set(y, { days: 0, sum: 0, open: 0 });
+    return years.get(y);
+  };
+  for (const t of trips) {
+    if (!t.dates.length) continue;
+    for (const r of tripRows(t)) {
+      const st = get(r.date.getFullYear());
+      st.days++;
+      st.sum += r.meal;
+    }
+    if (!t.sentAt) get(tripFirstDate(t).getFullYear()).open++;
+  }
+  return years;
+}
+
+function tripYearHTML(st) {
+  return `<a class="card form trip-year" href="#/reisekosten">
+    <div class="field"><span>Reisetage</span><b>${fmtDays(st.days)}</b></div>
+    <div class="field"><span>Spesen</span><b>${fmtEuro(st.sum)}</b></div>
+    <div class="field"><span>Offene Abrechnungen</span><b class="${st.open ? 'open-count' : ''}">${st.open}</b></div>
+  </a>`;
 }
 
 function overtimeYearHTML(year, months) {
@@ -605,7 +666,9 @@ function listRowHTML(s, hit) {
       <a class="list-row" href="#/zettel/${encodeURIComponent(s.id)}">
         <span class="status ${sent ? 'sent' : 'open'}">${sent ? ICON.check : ''}</span>
         <span class="list-main">
-          <span class="list-title">${fmtShort(sheetFirstDate(s))} – ${fmtShort(sheetLastDate(s))}${sheetHasWarning(s) ? ' <span class="list-warn">⚠️</span>' : ''}</span>
+          <span class="list-title">${fmtShort(sheetFirstDate(s))} – ${fmtShort(sheetLastDate(s))}${sheetHasWarning(s) ? ' <span class="list-warn">⚠️</span>' : ''}${
+            tripsForSheet(s).some((t) => t.dates.length) ? `<button class="list-trip" data-act="open-trip" data-id="${s.id}" aria-label="Reisekostenabrechnung öffnen">${ICON.suitcaseSmall}</button>` : ''
+          }</span>
           <span class="list-sub">KW ${isoWeek(parseDate(s.weekStart))} · ${sent ? 'gesendet' : 'offen'}</span>
           ${hit ? `<span class="list-hit">${escapeHtml(hit.label)}</span>` : ''}
         </span>
@@ -621,6 +684,7 @@ function listRowHTML(s, hit) {
 
 let editorId = null;
 let suggestions = { site: [], work: [] };
+let workBySite = new Map();
 /** Aufgeklappte leere Wochenendtage („Zettel-ID:Tag“), nur solange die App offen ist */
 const expandedDays = new Set();
 
@@ -632,6 +696,7 @@ function renderEditor(id) {
   }
   editorId = id;
   suggestions = { site: collectSuggestions('site'), work: collectSuggestions('work') };
+  workBySite = collectWorkBySite();
 
   app.innerHTML = `
     <header class="nav">
@@ -1637,6 +1702,7 @@ function renderSettings() {
         <select data-s="state">${Object.entries(STATES)
           .map(([code, name]) => `<option value="${code}" ${settings.state === code ? 'selected' : ''}>${name}</option>`)
           .join('')}</select></label>
+      <label class="field"><span>Urlaubsanspruch (Tage pro Jahr)</span><input data-s="vacationDays" type="text" inputmode="decimal" placeholder="z. B. 30" value="${settings.vacationDays ? String(settings.vacationDays).replace('.', ',') : ''}" enterkeyhint="done"></label>
       <label class="field"><span>Stunden pro Tag</span><input data-s="hoursPerDay" type="text" inputmode="decimal" value="${String(settings.hoursPerDay).replace('.', ',')}" enterkeyhint="done"></label>
       ${Object.entries(DAY_STATUS)
         .map(
@@ -1646,6 +1712,8 @@ function renderSettings() {
         .join('')}
     </div>
     <p class="footnote">Eingeschaltet: Der Tag zählt mit den „Stunden pro Tag“. Ausgeschaltet: 0 Stunden.</p>
+
+    ${hiddenSuggestionsHTML()}
 
     <h2 class="section-title">Reisekosten</h2>
     <div class="card form">
@@ -1671,6 +1739,22 @@ function renderSettings() {
     </div>
     <p class="footnote">Deine Zettel sind nur auf diesem iPhone. Speichere ab und zu eine Sicherung in iCloud Drive. Beim Einlesen geht nichts verloren.</p>
     <p class="footnote center muted">${sheets.length} Stundenzettel gespeichert</p>`;
+}
+
+function hiddenSuggestionsHTML() {
+  const items = ['site', 'work'].flatMap((field) => settings.hiddenSuggestions[field].map((value) => ({ field, value })));
+  return `<h2 class="section-title">Vorschläge</h2>
+    ${
+      items.length
+        ? `<div class="card form">${items
+            .map(
+              ({ field, value }) => `<div class="field"><span class="hidden-sugg"><span class="field-icon-inline">${field === 'site' ? ICON.pin : ICON.tool}</span>${escapeHtml(value)}</span>
+          <button class="link-btn" data-act="unhide" data-field="${field}" data-value="${escapeHtml(value)}">Wiederherstellen</button></div>`
+            )
+            .join('')}</div>`
+        : ''
+    }
+    <p class="footnote">Lange auf einen Vorschlag über der Tastatur drücken, um ihn auszublenden.</p>`;
 }
 
 function exportBackup() {
@@ -2004,9 +2088,37 @@ function suggestionsFor(input) {
       const l = v.toLowerCase();
       return l !== query && !used.includes(l) && (!query || l.includes(query));
     });
-  const list = match(q);
+  let list = match(q);
   // Art der Arbeit: Passt eigener Text zu keinem Vorschlag, trotzdem alle zum Anhängen zeigen
-  return field === 'work' && q && !list.length ? match('') : list;
+  if (field === 'work' && q && !list.length) list = match('');
+  if (field === 'work') {
+    // Was an der Baustelle dieser Zeile schon gemacht wurde, steht vorne (die häufigsten zuerst)
+    const siteInput = input.closest('.row')?.querySelector('[data-f="site"]');
+    const counts = workBySite.get((siteInput ? siteInput.value : '').trim().toLowerCase());
+    if (counts) {
+      const n = (v) => counts.get(v.toLowerCase()) || 0;
+      list = [...list.filter((v) => n(v)).sort((a, b) => n(b) - n(a)), ...list.filter((v) => !n(v))];
+    }
+  }
+  return list;
+}
+
+/** Vorschlag aus der Leiste ausblenden (nach langem Drücken) */
+function askHideSuggestion(text) {
+  const input = suggestInput;
+  if (!input) return;
+  const field = input.dataset.f;
+  confirmDialog(
+    'Vorschlag ausblenden?',
+    `„${escapeHtml(text)}“ erscheint nicht mehr in der Leiste. Deine Zettel bleiben unverändert. In den Einstellungen kannst du ihn wiederherstellen.`,
+    'Ausblenden',
+    () => {
+      settings.hiddenSuggestions[field].push(text);
+      saveSettings();
+      suggestions[field] = suggestions[field].filter((v) => v.toLowerCase() !== text.toLowerCase());
+      toast('Vorschlag ausgeblendet');
+    }
+  );
 }
 
 function showChips(input) {
@@ -2070,20 +2182,39 @@ function pickChip(text) {
 }
 
 // Antippen ohne Fokusverlust: Auswahl beim Loslassen, Wischen zum Blättern bleibt möglich
+// Lange drücken (600 ms) blendet den Vorschlag aus
 let chipTouch = null;
 suggestBar.addEventListener('touchstart', (e) => {
   const t = e.touches[0];
-  chipTouch = { x: t.clientX, y: t.clientY, chip: e.target.closest('[data-chip]') };
+  const chip = e.target.closest('[data-chip]');
+  const touch = { x: t.clientX, y: t.clientY, chip, long: false };
+  if (chip) {
+    touch.timer = setTimeout(() => {
+      touch.long = true;
+      askHideSuggestion(chip.dataset.chip);
+    }, 600);
+  }
+  chipTouch = touch;
+}, { passive: true });
+suggestBar.addEventListener('touchmove', (e) => {
+  const t = e.touches[0];
+  if (chipTouch && (Math.abs(t.clientX - chipTouch.x) > 10 || Math.abs(t.clientY - chipTouch.y) > 10)) clearTimeout(chipTouch.timer);
 }, { passive: true });
 suggestBar.addEventListener('touchend', (e) => {
   const t = e.changedTouches[0];
   const start = chipTouch;
   chipTouch = null;
   e.preventDefault(); // kein Klick danach, das Eingabefeld behält den Fokus
-  if (start && start.chip && Math.abs(t.clientX - start.x) < 10 && Math.abs(t.clientY - start.y) < 10) {
+  if (start) clearTimeout(start.timer);
+  if (start && start.chip && !start.long && Math.abs(t.clientX - start.x) < 10 && Math.abs(t.clientY - start.y) < 10) {
     pickChip(start.chip.dataset.chip);
   }
 }, { passive: false });
+suggestBar.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  const chip = e.target.closest('[data-chip]');
+  if (chip && !('ontouchstart' in window)) askHideSuggestion(chip.dataset.chip);
+});
 suggestBar.addEventListener('mousedown', (e) => e.preventDefault());
 suggestBar.addEventListener('click', (e) => {
   const chip = e.target.closest('[data-chip]');
@@ -2155,6 +2286,22 @@ document.addEventListener('click', (e) => {
     case 'backup-export':
       exportBackup();
       break;
+    case 'open-trip': {
+      e.preventDefault(); // nicht den Stundenzettel öffnen (Knopf liegt in dessen Zeile)
+      const s = findSheet(el.dataset.id);
+      const list = s ? tripsForSheet(s).filter((t) => t.dates.length) : [];
+      if (list.length === 1) location.hash = `#/reise/${list[0].id}`;
+      else if (list.length) actionSheet(list.map((t) => ({ label: escapeHtml(tripTitle(t)), run: () => (location.hash = `#/reise/${t.id}`) })));
+      break;
+    }
+    case 'unhide': {
+      const list = settings.hiddenSuggestions[el.dataset.field];
+      settings.hiddenSuggestions[el.dataset.field] = list.filter((v) => v !== el.dataset.value);
+      saveSettings();
+      renderSettings();
+      toast('Vorschlag wiederhergestellt');
+      break;
+    }
     case 'trip-new':
       newTripFromList();
       break;
@@ -2281,6 +2428,9 @@ document.addEventListener('input', (e) => {
     } else if (key === 'target' || key === 'hoursPerDay') {
       const v = parseFloat(t.value.replace(',', '.'));
       if (!Number.isNaN(v) && v >= 0) settings[key] = v;
+    } else if (key === 'vacationDays') {
+      const v = parseFloat(t.value.replace(',', '.'));
+      settings.vacationDays = Number.isNaN(v) || v < 0 ? 0 : v;
     } else if (key === 'minuteStep') {
       settings.minuteStep = Number(t.value);
     } else if (key === 'prorateTarget') {
