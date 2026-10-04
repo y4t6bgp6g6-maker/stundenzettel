@@ -309,6 +309,7 @@ function route() {
   const m = hash.match(/^#\/zettel\/(.+)$/);
   if (currentView === 'list') listScroll = window.scrollY;
   closeModal(true);
+  trimWorkInput(suggestInput);
   hideChips();
   if (m) {
     currentView = 'editor';
@@ -1282,6 +1283,14 @@ function showChips(input) {
   suggestBar.classList.toggle('show', list.length > 0);
   placeSuggestBar();
 }
+/** Art der Arbeit: ein Komma am Ende (von der letzten Auswahl) wieder entfernen */
+function trimWorkInput(input) {
+  if (!input || input.dataset.f !== 'work') return;
+  const trimmed = input.value.replace(/[\s,]+$/, '');
+  if (trimmed === input.value) return;
+  input.value = trimmed;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+}
 function hideChips() {
   suggestInput = null;
   suggestBar.classList.remove('show');
@@ -1314,7 +1323,8 @@ function pickChip(text) {
     if (last && isKnown('work', last)) done.push(last);
     else if (last && !text.toLowerCase().includes(last.toLowerCase())) done.push(last);
     done.push(text);
-    input.value = done.join(', ');
+    // Komma und Leerzeichen gleich mitsetzen, damit direkt weitergeschrieben werden kann
+    input.value = `${done.join(', ')}, `;
     input.dispatchEvent(new Event('input', { bubbles: true }));
   } else {
     input.value = text;
@@ -1491,7 +1501,9 @@ document.addEventListener('focusin', (e) => {
   if (e.target.matches('.txt')) showChips(e.target);
 });
 document.addEventListener('focusout', (e) => {
-  if (e.target.matches('.txt') && suggestInput === e.target) hideChips();
+  if (!e.target.matches('.txt')) return;
+  trimWorkInput(e.target);
+  if (suggestInput === e.target) hideChips();
 });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && e.target.matches('input:not([type=checkbox])')) {
