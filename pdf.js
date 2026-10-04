@@ -463,7 +463,8 @@ function buildTravelPdf(t) {
     const boxH = bottomRowH + 10;
     const ratio = t.signature.ratio || 0.35;
     const scale = Math.min(boxW, boxH / ratio);
-    const top = yC + bottomRowH - 2 - ratio * scale;
+    // Die Linie im Unterschriftenfeld liegt bei 76 % der Höhe (.sig-line in styles.css) und kommt auf die Unterkante der Zeile
+    const top = yEnd - 0.76 * ratio * scale;
     for (const stroke of t.signature.strokes) {
       doc.path(stroke.map(([x, y]) => [boxX + x * scale, top + y * ratio * scale]), 1.1, 0.1);
     }
