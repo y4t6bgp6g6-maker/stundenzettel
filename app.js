@@ -95,6 +95,9 @@ const sheetLastDate = (s) => sheetDate(s, sheetActiveDays(s).at(-1) ?? 6);
 const sheetTitle = (s) => `Stundenzettel ${fmtShort(sheetFirstDate(s))} - ${fmtShort(sheetLastDate(s))}`;
 const sheetTotal = (s) => sheetActiveDays(s).reduce((t, i) => t + dayTotal(s.days[i]), 0);
 const sheetOvertime = (s, targetHours) => Math.max(0, sheetTotal(s) - Math.round(targetHours * 60));
+/** Soll des Zettels in Stunden: anteilig je Werktag Mo–Fr des Monats oder das volle Wochen-Soll */
+const sheetTarget = (s) =>
+  settings.prorateTarget ? (settings.target / 5) * sheetActiveDays(s).filter((i) => i < 5).length : settings.target;
 const sheetMatches = (s, anchor) => {
   const n = newSheet(anchor, '');
   return n.weekStart === s.weekStart && n.year === s.year && n.month === s.month;
@@ -113,6 +116,8 @@ const DEFAULT_SETTINGS = {
   hourFormat: 'dec',
   state: 'NI',
   credit: { krank: true, urlaub: true, feiertag: true, frei: false },
+  dayBar: true,
+  prorateTarget: true,
 };
 
 function readJson(key, fallback) {
@@ -275,6 +280,10 @@ const ICON = {
   close: svg('<path d="M18 6L6 18M6 6l12 12"/>', 16),
   chevronLeft: svg('<path d="M15 18l-6-6 6-6"/>', 20),
   chevronRight: svg('<path d="M9 18l6-6-6-6"/>', 20),
+  search: svg('<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>'),
+  up: svg('<path d="M12 19V5M5 12l7-7 7 7"/>', 22),
+  pin: svg('<path d="M12 21s-6-5.3-6-10a6 6 0 0 1 12 0c0 4.7-6 10-6 10z"/><circle cx="12" cy="11" r="2.2"/>', 15),
+  tool: svg('<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3.6 17.4a1.4 1.4 0 0 0 2 2l5.7-5.7a4 4 0 0 0 5.4-5.4l-2.4 2.4-2-2z"/>', 15),
 };
 
 // ───────────────────────── Routing ─────────────────────────
@@ -282,6 +291,10 @@ const ICON = {
 const app = document.getElementById('app');
 let listScroll = 0;
 let currentView = '';
+/** Monat (JJJJMM), zu dem die Liste nach dem Öffnen scrollen soll */
+let pendingMonth = null;
+/** Suchbegriff in der Liste; null = Suche geschlossen */
+let searchQuery = null;
 
 function route() {
   const hash = location.hash;
@@ -303,8 +316,14 @@ function route() {
   } else {
     currentView = 'list';
     renderList();
-    window.scrollTo(0, listScroll);
+    if (pendingMonth) {
+      scrollToMonth(pendingMonth);
+      pendingMonth = null;
+    } else {
+      window.scrollTo(0, listScroll);
+    }
   }
+  updateTopButton();
 }
 window.addEventListener('hashchange', route);
 
@@ -316,52 +335,142 @@ function goBack() {
 // ───────────────────────── Liste ─────────────────────────
 
 function renderList() {
+  const searching = searchQuery != null;
+  app.innerHTML = `
+    <header class="nav">
+      ${
+        searching
+          ? `<div class="search-bar">
+              <span class="search-field">${ICON.search}<input type="search" data-search placeholder="Baustelle oder Datum" value="${escapeHtml(searchQuery)}" autocomplete="off" enterkeyhint="search"></span>
+              <button class="nav-btn" data-act="search-close">Abbrechen</button>
+            </div>`
+          : `<button class="nav-btn" data-act="settings" aria-label="Einstellungen">${ICON.gear}</button>
+            <span class="nav-title"></span>
+            ${sheets.length ? `<button class="nav-btn" data-act="search" aria-label="Suchen">${ICON.search}</button>` : '<span class="nav-btn"></span>'}`
+      }
+    </header>
+    ${!searching && sheets.length ? statsCardHTML() : ''}
+    ${searching ? '' : '<h1 class="large-title">Stundenzettel</h1>'}
+    <div id="list-body">${listBodyHTML()}</div>
+    ${
+      searching
+        ? ''
+        : `<div class="bottom-bar">
+            <button class="to-top" data-act="to-top" aria-label="Nach oben">${ICON.up}</button>
+            <button class="primary" data-act="new">${ICON.plus} Neuer Stundenzettel</button>
+          </div>`
+    }`;
+}
+
+function listBodyHTML() {
+  const searching = searchQuery != null;
+  const query = searching ? parseQuery(searchQuery) : null;
   const groups = new Map();
+  const hits = new Map();
   for (const s of sheets) {
+    if (query) {
+      const hit = searchSheet(s, query);
+      if (!hit) continue;
+      hits.set(s.id, hit);
+    }
     const key = s.year * 100 + s.month;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(s);
   }
   const keys = [...groups.keys()].sort((a, b) => b - a);
 
-  const content = keys.length
-    ? keys
-        .map((k) => {
-          const list = groups.get(k).sort((a, b) => sheetFirstDate(b) - sheetFirstDate(a));
-          const monthTotal = list.reduce((t, sh) => t + sheetTotal(sh), 0);
-          return `<h2 class="section-title month-head"><span>${MONTHS[(k % 100) - 1]} ${Math.floor(k / 100)}</span><span class="month-total">Gesamt ${fmtH(monthTotal)}</span></h2>
-          <div class="card list">${list.map(listRowHTML).join('')}</div>`;
-        })
-        .join('')
-    : `<div class="empty">
-        <div class="empty-icon">${svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/>', 44)}</div>
-        <p><b>Noch keine Stundenzettel</b></p>
-        <p class="muted">${settings.name.trim() ? 'Tippe unten auf „Neuer Stundenzettel“ und wähle eine Woche.' : 'Trage zuerst oben links unter Einstellungen deinen Namen ein. Danach tippst du unten auf „Neuer Stundenzettel“.'}</p>
-      </div>`;
-
-  app.innerHTML = `
-    <header class="nav">
-      <button class="nav-btn" data-act="settings" aria-label="Einstellungen">${ICON.gear}</button>
-      <span class="nav-title"></span>
-      <span class="nav-btn"></span>
-    </header>
-    ${keys.length ? statsCardHTML() : ''}
-    <h1 class="large-title">Stundenzettel</h1>
-    ${content}
-    <div class="bottom-bar"><button class="primary" data-act="new">${ICON.plus} Neuer Stundenzettel</button></div>`;
+  if (keys.length) {
+    return keys
+      .map((k) => {
+        const list = groups.get(k).sort((a, b) => sheetFirstDate(b) - sheetFirstDate(a));
+        const monthTotal = list.reduce((t, sh) => t + sheetTotal(sh), 0);
+        return `<h2 class="section-title month-head" id="m-${k}"><span>${MONTHS[(k % 100) - 1]} ${Math.floor(k / 100)}</span>${searching ? '' : `<span class="month-total">Gesamt ${fmtH(monthTotal)}</span>`}</h2>
+        <div class="card list">${list.map((sh) => listRowHTML(sh, hits.get(sh.id))).join('')}</div>`;
+      })
+      .join('');
+  }
+  if (searching) {
+    return query
+      ? `<p class="search-empty muted">Keine Stundenzettel gefunden</p>`
+      : `<p class="search-empty muted">Suche nach einer Baustelle (z. B. „Lindenstraße“) oder einem Datum (z. B. „15.09.“ oder „15.09.26“).</p>`;
+  }
+  return `<div class="empty">
+      <div class="empty-icon">${svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/>', 44)}</div>
+      <p><b>Noch keine Stundenzettel</b></p>
+      <p class="muted">${settings.name.trim() ? 'Tippe unten auf „Neuer Stundenzettel“ und wähle eine Woche.' : 'Trage zuerst oben links unter Einstellungen deinen Namen ein. Danach tippst du unten auf „Neuer Stundenzettel“.'}</p>
+    </div>`;
 }
+
+/** Suchbegriff deuten: Datum „15.09.“ / „15.9.26“ / „15.09.2026“ oder Text */
+function parseQuery(raw) {
+  const q = raw.trim();
+  if (!q) return null;
+  const m = q.match(/^(\d{1,2})\.(\d{1,2})\.?(\d{2}|\d{4})?$/);
+  if (m) {
+    const year = m[3] ? (m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3])) : null;
+    return { day: Number(m[1]), month: Number(m[2]), year };
+  }
+  return { text: q.toLowerCase() };
+}
+
+/** Treffer in einem Zettel: { label } für die Zeile in der Liste, sonst null */
+function searchSheet(s, query) {
+  const days = sheetActiveDays(s);
+  if (query.text) {
+    const found = new Set();
+    const dayNames = [];
+    for (const i of days) {
+      let dayHit = false;
+      for (const r of s.days[i].rows) {
+        for (const v of [r.site, r.work]) {
+          if (v && v.toLowerCase().includes(query.text)) {
+            found.add(v.trim());
+            dayHit = true;
+          }
+        }
+      }
+      if (dayHit) dayNames.push(WEEKDAYS_SHORT[i]);
+    }
+    return found.size ? { label: `${dayNames.join(', ')} · ${[...found].join(', ')}` } : null;
+  }
+  for (const i of days) {
+    const d = sheetDate(s, i);
+    if (d.getDate() === query.day && d.getMonth() + 1 === query.month && (query.year == null || d.getFullYear() === query.year)) {
+      return { label: `${WEEKDAYS[i]}, ${fmtShort(d)}` };
+    }
+  }
+  return null;
+}
+
+function refreshListBody() {
+  const body = document.getElementById('list-body');
+  if (body) body.innerHTML = listBodyHTML();
+}
+
+/** Höhe der festen Kopfzeile, damit Sprungziele nicht darunter verschwinden */
+const navHeight = () => document.querySelector('.nav')?.offsetHeight || 0;
+
+function scrollToMonth(key) {
+  const el = document.getElementById(`m-${key}`);
+  if (el) window.scrollTo(0, el.getBoundingClientRect().top + window.scrollY - navHeight() - 4);
+}
+
+/** Knopf „nach oben“ erst zeigen, wenn weit genug gescrollt wurde */
+function updateTopButton() {
+  const btn = document.querySelector('.to-top');
+  if (btn) btn.classList.toggle('show', window.scrollY > 300);
+}
+window.addEventListener('scroll', () => requestAnimationFrame(updateTopButton), { passive: true });
 
 const fmtDays = (n) => `${n} ${n === 1 ? 'Tag' : 'Tage'}`;
 
 function statsCardHTML() {
   const year = new Date().getFullYear();
   const st = absenceStats().get(year) || { urlaub: 0, krank: 0 };
-  const yearMins = yearBalance(overtimeAccount().get(year) || new Map());
   return `<a class="card stats-card" href="#/uebersicht">
     <span class="stats-year">${year}</span>
     <span class="stats-item"><span class="stats-num">${st.urlaub}</span><span class="stats-label">${st.urlaub === 1 ? 'Urlaubstag' : 'Urlaubstage'}</span></span>
     <span class="stats-item"><span class="stats-num">${st.krank}</span><span class="stats-label">${st.krank === 1 ? 'Krankheitstag' : 'Krankheitstage'}</span></span>
-    ${settings.overtime ? `<span class="stats-item"><span class="stats-num ${balanceClass(yearMins)}">${fmtSigned(yearMins)}</span><span class="stats-label">Überstunden</span></span>` : ''}
     <span class="list-chevron">${ICON.chevronRight}</span>
   </a>`;
 }
@@ -399,7 +508,12 @@ function renderStats() {
 function overtimeYearHTML(year, months) {
   const rows = [...months.keys()]
     .sort((a, b) => b - a)
-    .map((m) => `<div class="field"><span>${MONTHS[m - 1]}</span><b class="${balanceClass(months.get(m))}">${fmtSigned(months.get(m))}</b></div>`)
+    .map(
+      (m) => `<button class="field month-link" data-act="goto-month" data-month="${year * 100 + m}">
+        <span>${MONTHS[m - 1]}</span>
+        <span class="month-link-value"><b class="${balanceClass(months.get(m))}">${fmtSigned(months.get(m))}</b><span class="list-chevron">${ICON.chevronRight}</span></span>
+      </button>`
+    )
     .join('');
   const total = yearBalance(months);
   return `<div class="card form overtime-card">
@@ -408,7 +522,7 @@ function overtimeYearHTML(year, months) {
   </div>`;
 }
 
-function listRowHTML(s) {
+function listRowHTML(s, hit) {
   const sent = !!s.sentAt;
   return `<div class="swipe">
     <div class="swipe-track">
@@ -417,6 +531,7 @@ function listRowHTML(s) {
         <span class="list-main">
           <span class="list-title">${fmtShort(sheetFirstDate(s))} – ${fmtShort(sheetLastDate(s))}</span>
           <span class="list-sub">KW ${isoWeek(parseDate(s.weekStart))} · ${sent ? 'gesendet' : 'offen'}</span>
+          ${hit ? `<span class="list-hit">${escapeHtml(hit.label)}</span>` : ''}
         </span>
         <span class="list-hours">${fmtH(sheetTotal(s))}</span>
         <span class="list-chevron">${ICON.chevronRight}</span>
@@ -430,6 +545,8 @@ function listRowHTML(s) {
 
 let editorId = null;
 let suggestions = { site: [], work: [] };
+/** Aufgeklappte leere Wochenendtage („Zettel-ID:Tag“), nur solange die App offen ist */
+const expandedDays = new Set();
 
 function renderEditor(id) {
   const s = findSheet(id);
@@ -443,35 +560,75 @@ function renderEditor(id) {
   app.innerHTML = `
     <header class="nav">
       <button class="nav-btn back" data-act="back">${ICON.back}<span>Zettel</span></button>
-      <span class="nav-title" id="nav-title">${fmtShort(sheetFirstDate(s))} – ${fmtShort(sheetLastDate(s))}</span>
+      <button class="nav-title" data-act="week" id="nav-title">${fmtShort(sheetFirstDate(s))} – ${fmtShort(sheetLastDate(s))}</button>
       <button class="nav-btn" data-act="more" aria-label="Weitere Aktionen">${ICON.more}</button>
+      ${settings.dayBar ? `<div class="daybar" id="daybar">${dayBarHTML(s)}</div>` : ''}
     </header>
-    <div class="card form">
-      <label class="field"><span>Name</span><input data-f="name" placeholder="Name eintragen" value="${escapeHtml(s.name)}" autocomplete="off" enterkeyhint="done"></label>
-      <button class="field" data-act="week">
-        <span>Woche</span>
-        <span class="field-value" id="week-value">${fmtShort(sheetFirstDate(s))} – ${fmtShort(sheetLastDate(s))} ${ICON.calendar}</span>
-      </button>
-    </div>
-    <div id="days">${s.days.map((_, i) => dayHTML(s, i)).join('')}</div>
+    <div id="days">${daysHTML(s)}</div>
     <div class="card summary" id="summary">${summaryHTML(s)}</div>`;
 }
+
+/** Kurze Stundenangabe für die Tagesleiste: „9,5“ bzw. „9:30“ */
+const fmtTiny = (min) =>
+  settings.hourFormat === 'hm'
+    ? `${Math.floor(min / 60)}:${pad(min % 60)}`
+    : String(Math.round((min / 60) * 100) / 100).replace('.', ',');
+
+/** Tagesleiste: Mo–So mit Stunden, heute markiert, rechts die Wochensumme */
+function dayBarHTML(s) {
+  const today = new Date();
+  return `${s.days
+    .map((d, i) => {
+      if (!sheetIsActive(s, i)) return `<span class="db-day off"><span class="db-name">${WEEKDAYS_SHORT[i]}</span><span class="db-h"></span></span>`;
+      const total = dayTotal(d);
+      const cls = ['db-day', sameDay(sheetDate(s, i), today) ? 'today' : '', d.status ? `status-${d.status} has-status` : ''].join(' ');
+      return `<button class="${cls}" data-act="jump" data-day="${i}">
+        <span class="db-name">${WEEKDAYS_SHORT[i]}</span>
+        <span class="db-h">${d.status ? DAY_STATUS_SHORT[d.status].slice(0, 2) + '.' : total ? fmtTiny(total) : '–'}</span>
+      </button>`;
+    })
+    .join('')}<span class="db-day db-sum"><span class="db-name">Woche</span><span class="db-h">${fmtTiny(sheetTotal(s))}</span></span>`;
+}
+
+/** Alle Tage; zusammenhängende Tage des anderen Monats werden zu einer schmalen Zeile */
+function daysHTML(s) {
+  let html = '';
+  for (let i = 0; i < 7; ) {
+    if (sheetIsActive(s, i)) {
+      html += dayHTML(s, i);
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j + 1 < 7 && !sheetIsActive(s, j + 1)) j++;
+    const range = i === j ? WEEKDAYS_SHORT[i] : `${WEEKDAYS_SHORT[i]} – ${WEEKDAYS_SHORT[j]}`;
+    html += `<div class="other-month">${range} ${i === 0 ? 'vorheriger' : 'nächster'} Monat</div>`;
+    i = j + 1;
+  }
+  return html;
+}
+
+/** Leerer Sa/So ohne Tagesart wird eingeklappt angezeigt */
+const dayCollapsed = (s, i) => {
+  const d = s.days[i];
+  return i >= 5 && !d.status && !d.pause && d.rows.every(rowIsEmpty) && !expandedDays.has(`${s.id}:${i}`);
+};
 
 function dayHTML(s, i) {
   const day = s.days[i];
   const date = sheetDate(s, i);
-  if (!sheetIsActive(s, i)) {
-    return `<section class="day inactive" data-day="${i}">
-      <div class="day-head"><div><b>${WEEKDAYS[i]}</b> <span class="muted">${fmtDayMonth(date)}</span></div></div>
-      <div class="inactive-note">gehört zum ${MONTHS[date.getMonth()]}</div>
-    </section>`;
-  }
   const head = `<div class="day-head">
       <div><b>${WEEKDAYS[i]}</b> <span class="muted">${fmtDayMonth(date)}</span></div>
       <div class="day-actions">
         <button class="chip-btn status-btn ${day.status ? 'set status-' + day.status : ''}" data-act="status">${day.status ? DAY_STATUS_SHORT[day.status] : 'Arbeit'} ▾</button>
       </div>
     </div>`;
+  if (dayCollapsed(s, i)) {
+    return `<section class="day collapsed" data-day="${i}">
+      ${head}
+      <button class="link-btn expand-btn" data-act="expand">${ICON.plus} Arbeit eintragen</button>
+    </section>`;
+  }
   if (day.status) {
     const credit = dayTotal(day);
     return `<section class="day status-day status-${day.status}" data-day="${i}">
@@ -529,15 +686,16 @@ function rowHTML(r, rowCount) {
       <span class="row-hours">${m == null ? '' : fmtH(m)}</span>
       ${rowCount > 1 ? `<button class="row-del" data-act="delrow" aria-label="Zeile löschen">${ICON.close}</button>` : '<span class="row-del-space"></span>'}
     </div>
-    <div class="suggest-wrap ${fieldMissing(r, 'site') ? 'missing' : ''}"><span class="warn" aria-label="fehlt">⚠️</span><input class="txt" data-f="site" placeholder="Baustelle" value="${escapeHtml(r.site)}" autocomplete="off" autocapitalize="sentences" enterkeyhint="next"><div class="chips"></div></div>
-    <div class="suggest-wrap ${fieldMissing(r, 'work') ? 'missing' : ''}"><span class="warn" aria-label="fehlt">⚠️</span><input class="txt" data-f="work" placeholder="Art der Arbeit" value="${escapeHtml(r.work)}" autocomplete="off" autocapitalize="sentences" enterkeyhint="done"><div class="chips"></div></div>
+    <div class="suggest-wrap ${fieldMissing(r, 'site') ? 'missing' : ''}"><span class="field-icon">${ICON.pin}</span><span class="warn" aria-label="fehlt">⚠️</span><input class="txt" data-f="site" placeholder="Baustelle" value="${escapeHtml(r.site)}" autocomplete="off" autocapitalize="sentences" enterkeyhint="next"><div class="chips"></div></div>
+    <div class="suggest-wrap ${fieldMissing(r, 'work') ? 'missing' : ''}"><span class="field-icon">${ICON.tool}</span><span class="warn" aria-label="fehlt">⚠️</span><input class="txt" data-f="work" placeholder="Art der Arbeit" value="${escapeHtml(r.work)}" autocomplete="off" autocapitalize="sentences" enterkeyhint="done"><div class="chips"></div></div>
   </div>`;
 }
 
 function summaryHTML(s) {
   let html = `<div class="sum-row"><span>Stunden Gesamt</span><b>${fmtH(sheetTotal(s))}</b></div>`;
   if (settings.overtime) {
-    html += `<div class="sum-row"><span>Überstunden <span class="muted">(Soll ${fmtH(Math.round(settings.target * 60))})</span></span><b>${fmtH(sheetOvertime(s, settings.target))}</b></div>`;
+    const target = sheetTarget(s);
+    html += `<div class="sum-row"><span>Überstunden <span class="muted">(Soll ${fmtH(Math.round(target * 60))})</span></span><b>${fmtH(sheetOvertime(s, target))}</b></div>`;
   }
   return html;
 }
@@ -554,6 +712,14 @@ function refreshSummary() {
   const s = currentSheet();
   const el = document.getElementById('summary');
   if (el) el.innerHTML = summaryHTML(s);
+  const bar = document.getElementById('daybar');
+  if (bar) bar.innerHTML = dayBarHTML(s);
+}
+
+/** Zum Tag scrollen, ohne dass er unter der festen Kopfzeile verschwindet */
+function jumpToDay(i) {
+  const el = document.querySelector(`.day[data-day="${i}"]`);
+  if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - navHeight() - 8, behavior: 'smooth' });
 }
 function refreshAll() {
   const y = window.scrollY;
@@ -628,11 +794,21 @@ function moreMenu() {
   const s = currentSheet();
   actionSheet([
     { label: 'Als PDF senden', run: () => sendWithCheck(s) },
+    { label: 'Woche ändern', run: () => changeWeek() },
+    { label: `Name ändern${s.name.trim() ? ` (${escapeHtml(s.name.trim())})` : ''}`, run: () => editName(s) },
     s.sentAt
       ? { label: 'Als offen markieren', run: () => { s.sentAt = null; saveSheets(s); toast('Als offen markiert'); } }
       : { label: 'Als gesendet markieren', run: () => { s.sentAt = Date.now(); saveSheets(s); toast('Als gesendet markiert'); } },
     { label: 'Stundenzettel löschen', destructive: true, run: () => askDelete(s.id, true) },
   ]);
+}
+
+function editName(s) {
+  promptDialog('Name auf diesem Zettel', s.name, 'Vor- und Nachname', (value) => {
+    s.name = value.trim();
+    saveSheets(s);
+    toast('Name geändert');
+  });
 }
 
 function sendWithCheck(s) {
@@ -663,7 +839,7 @@ function askDelete(id, leave) {
 // ───────────────────────── PDF & Senden ─────────────────────────
 
 function pdfFileFor(s) {
-  const blob = buildTimesheetPdf(s, settings.overtime ? settings.target : null);
+  const blob = buildTimesheetPdf(s, settings.overtime ? sheetTarget(s) : null);
   return new File([blob], `${sheetTitle(s)}.pdf`, { type: 'application/pdf' });
 }
 
@@ -739,15 +915,17 @@ function renderSettings() {
           <option value="dec" ${settings.hourFormat !== 'hm' ? 'selected' : ''}>Dezimal (8,50)</option>
           <option value="hm" ${settings.hourFormat === 'hm' ? 'selected' : ''}>Stunden/Min. (8h 30m)</option>
         </select></label>
+      <label class="field toggle-field"><span>Tagesleiste im Zettel</span><input type="checkbox" class="toggle" data-s="dayBar" ${settings.dayBar ? 'checked' : ''}></label>
     </div>
-    <p class="footnote">Die Zeitschritte gelten für Arbeitsbeginn, Arbeitsende und Pause. Das Stundenformat gilt für Stunden, Pause und Summen in der App und im PDF.</p>
+    <p class="footnote">Die Zeitschritte gelten für Arbeitsbeginn, Arbeitsende und Pause. Das Stundenformat gilt für Stunden, Pause und Summen in der App und im PDF. Die Tagesleiste zeigt oben im Zettel die Stunden je Tag; ein Tipp springt zum Tag.</p>
 
     <h2 class="section-title">Überstunden</h2>
     <div class="card form">
       <label class="field toggle-field"><span>Überstunden berechnen</span><input type="checkbox" class="toggle" data-s="overtime" ${settings.overtime ? 'checked' : ''}></label>
       <label class="field ${settings.overtime ? '' : 'disabled'}" id="target-field"><span>Soll pro Woche (h)</span><input data-s="target" type="text" inputmode="decimal" value="${String(settings.target).replace('.', ',')}" ${settings.overtime ? '' : 'disabled'} enterkeyhint="done"></label>
+      <label class="field toggle-field ${settings.overtime ? '' : 'disabled'}" id="prorate-field"><span>Soll bei Teilwochen anteilig</span><input type="checkbox" class="toggle" data-s="prorateTarget" ${settings.prorateTarget ? 'checked' : ''} ${settings.overtime ? '' : 'disabled'}></label>
     </div>
-    <p class="footnote">Auf dem Wochenzettel: Überstunden = Stunden Gesamt − Soll, weniger als das Soll zählt als 0. Das Überstunden-Konto in der Übersicht rechnet monatlich Tag für Tag und verrechnet Plus- und Minusstunden. Tage ohne Stundenzettel zählen nicht mit.</p>
+    <p class="footnote">Auf dem Wochenzettel: Überstunden = Stunden Gesamt − Soll, weniger als das Soll zählt als 0. Liegt eine Woche in zwei Monaten, gilt bei „anteilig“ nur das Soll der Werktage Mo–Fr dieses Zettels (z. B. 3 Werktage = 24 h), sonst das volle Wochen-Soll. Das Überstunden-Konto in der Übersicht rechnet monatlich Tag für Tag und verrechnet Plus- und Minusstunden. Tage ohne Stundenzettel zählen nicht mit.</p>
 
     <h2 class="section-title">Krankheit, Urlaub, Feiertage</h2>
     <div class="card form">
@@ -1039,6 +1217,34 @@ function confirmDialog(title, message, okLabel, onOk, destructive = false, cance
   });
 }
 
+function promptDialog(title, value, placeholder, onOk) {
+  const modal = openModal(
+    `<div class="alert-body"><b>${title}</b><input class="alert-input" value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}" autocomplete="off" enterkeyhint="done"></div>
+    <div class="alert-buttons">
+      <button data-c="no">Abbrechen</button>
+      <button data-c="yes" class="strong">Sichern</button>
+    </div>`,
+    'alert'
+  );
+  const input = modal.querySelector('input');
+  input.focus();
+  const finish = (ok) => {
+    closeModal();
+    if (ok) onOk(input.value);
+  };
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      e.stopPropagation();
+      finish(true);
+    }
+  });
+  modal.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-c]');
+    if (b) finish(b.dataset.c === 'yes');
+  });
+}
+
 let toastTimer = 0;
 function toast(text, ms = 2200) {
   const el = document.getElementById('toast');
@@ -1127,10 +1333,38 @@ document.addEventListener('click', (e) => {
     case 'backup-export':
       exportBackup();
       break;
+    case 'search':
+      searchQuery = '';
+      renderList();
+      window.scrollTo(0, 0);
+      document.querySelector('[data-search]').focus();
+      break;
+    case 'search-close':
+      searchQuery = null;
+      renderList();
+      window.scrollTo(0, 0);
+      break;
+    case 'to-top':
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      break;
+    case 'goto-month':
+      pendingMonth = Number(el.dataset.month);
+      goBack();
+      break;
+    case 'jump':
+      jumpToDay(Number(el.dataset.day));
+      break;
+    case 'expand': {
+      const { s, dayIndex } = rowContext(el);
+      expandedDays.add(`${s.id}:${dayIndex}`);
+      refreshDay(dayIndex);
+      break;
+    }
   }
 });
 
 // Vorschlag antippen, ohne dass das Eingabefeld vorher den Fokus verliert
+let swallowTapUntil = 0;
 document.addEventListener('pointerdown', (e) => {
   const chip = e.target.closest('[data-chip]');
   if (!chip) return;
@@ -1140,29 +1374,44 @@ document.addEventListener('pointerdown', (e) => {
   input.dispatchEvent(new Event('input', { bubbles: true }));
   hideChips(input);
   input.blur();
+  // Die Vorschläge verschwinden sofort und der Inhalt rutscht nach oben. Der Klick, den Safari nach
+  // dem Loslassen auslöst, würde sonst auf „+ Zeile“, „Pause“ o. Ä. darunter landen.
+  swallowTapUntil = Date.now() + 700;
 });
+for (const type of ['mousedown', 'mouseup', 'click']) {
+  document.addEventListener(
+    type,
+    (e) => {
+      if (Date.now() < swallowTapUntil) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (type === 'click') swallowTapUntil = 0;
+      }
+    },
+    true
+  );
+}
 
 document.addEventListener('input', (e) => {
   const t = e.target;
   if (t.dataset.f) {
     const s = currentSheet();
     if (!s) return;
-    if (t.dataset.f === 'name') {
-      s.name = t.value;
-    } else {
-      const { row } = rowContext(t);
-      if (row) {
-        row[t.dataset.f] = t.value;
-        t.closest('.suggest-wrap').classList.toggle('missing', fieldMissing(row, t.dataset.f));
-      }
-      showChips(t);
+    const { row } = rowContext(t);
+    if (row) {
+      row[t.dataset.f] = t.value;
+      t.closest('.suggest-wrap').classList.toggle('missing', fieldMissing(row, t.dataset.f));
     }
+    showChips(t);
     saveSheets(s);
+  } else if (t.dataset.search != null) {
+    searchQuery = t.value;
+    refreshListBody();
   } else if (t.dataset.s) {
     const key = t.dataset.s;
     if (key === 'overtime') {
       settings.overtime = t.checked;
-      ['target-field'].forEach((fid) => {
+      ['target-field', 'prorate-field'].forEach((fid) => {
         const field = document.getElementById(fid);
         field.classList.toggle('disabled', !t.checked);
         field.querySelector('input').disabled = !t.checked;
@@ -1172,6 +1421,8 @@ document.addEventListener('input', (e) => {
       if (!Number.isNaN(v) && v >= 0) settings[key] = v;
     } else if (key === 'minuteStep') {
       settings.minuteStep = Number(t.value);
+    } else if (key === 'dayBar' || key === 'prorateTarget') {
+      settings[key] = t.checked;
     } else if (key.startsWith('credit.')) {
       settings.credit[key.slice(7)] = t.checked;
     } else {
