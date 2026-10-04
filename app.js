@@ -41,6 +41,10 @@ function isoWeek(date) {
 const uid = () =>
   globalThis.crypto && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
 
+/** Vergleich: Groß-/Kleinschreibung und Art des Apostrophs egal („Bäcker's Eck“ = „Bäcker’s eck“) */
+const sameKey = (s) => String(s ?? '').trim().toLowerCase().replace(/[’‘`´ʼ′]/g, "'");
+/** Suche: zusätzlich ohne Apostrophe, Leerzeichen, Kommas, Bindestriche und Punkte („Bäckerseck“ findet „Bäcker's Eck“) */
+const searchKey = (s) => sameKey(s).replace(/['\s,.\-–]/g, '');
 const escapeHtml = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
@@ -311,13 +315,21 @@ function collectSuggestions(field) {
         const parts = field === 'work' ? (r[field] || '').split(',') : [r[field] || ''];
         for (const part of parts) {
           const v = part.trim();
-          if (v) counts.set(v, (counts.get(v) || 0) + 1);
+          if (!v) continue;
+          // Verschiedene Apostrophe / Groß- und Kleinschreibung ergeben einen Vorschlag
+          const key = sameKey(v);
+          if (!counts.has(key)) counts.set(key, { total: 0, spellings: new Map() });
+          const c = counts.get(key);
+          c.total++;
+          c.spellings.set(v, (c.spellings.get(v) || 0) + 1);
         }
       }
   // Ausgeblendete Vorschläge (langes Drücken in der Leiste) bleiben weg, bis sie wiederhergestellt werden
-  const hidden = new Set(settings.hiddenSuggestions[field].map((v) => v.toLowerCase()));
+  const hidden = new Set(settings.hiddenSuggestions[field].map(sameKey));
   return [...counts]
-    .filter(([v]) => !hidden.has(v.toLowerCase()))
+    .filter(([key]) => !hidden.has(key))
+    // angezeigt wird die häufigste Schreibweise
+    .map(([, c]) => [[...c.spellings].sort((a, b) => b[1] - a[1])[0][0], c.total])
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'de'))
     .map(([v]) => v);
 }
@@ -328,12 +340,12 @@ function collectWorkBySite() {
   for (const s of sheets)
     for (const d of s.days)
       for (const r of d.rows) {
-        const site = (r.site || '').trim().toLowerCase();
+        const site = sameKey(r.site);
         if (!site) continue;
         if (!map.has(site)) map.set(site, new Map());
         const works = map.get(site);
         for (const part of (r.work || '').split(',')) {
-          const w = part.trim().toLowerCase();
+          const w = sameKey(part);
           if (w) works.set(w, (works.get(w) || 0) + 1);
         }
       }
@@ -504,7 +516,7 @@ function parseQuery(raw) {
     const year = m[3] ? (m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3])) : null;
     return { day: Number(m[1]), month: Number(m[2]), year };
   }
-  return { text: q.toLowerCase() };
+  return { text: searchKey(q) };
 }
 
 /** Treffer in einem Zettel: { label } für die Zeile in der Liste, sonst null */
@@ -518,7 +530,7 @@ function searchSheet(s, query) {
       // Tagesart (Urlaub, Krank, …) zählt als Treffer, die Zeilen des Tages dann nicht
       const status = s.days[i].status;
       if (status) {
-        if ([DAY_STATUS_SHORT[status], DAY_STATUS[status]].some((v) => v.toLowerCase().includes(query.text))) {
+        if ([DAY_STATUS_SHORT[status], DAY_STATUS[status]].some((v) => searchKey(v).includes(query.text))) {
           found.add(DAY_STATUS_SHORT[status]);
           dayNames.push(WEEKDAYS_SHORT[i]);
         }
@@ -526,7 +538,7 @@ function searchSheet(s, query) {
       }
       for (const r of s.days[i].rows) {
         for (const v of [r.site, r.work]) {
-          if (v && v.toLowerCase().includes(query.text)) {
+          if (v && searchKey(v).includes(query.text)) {
             found.add(v.trim());
             dayHit = true;
           }
@@ -1072,14 +1084,14 @@ function joinSites(sites) {
   for (const site of sites) {
     const m = site.match(/^([^,]+),\s*(.+)$/);
     const last = groups.at(-1);
-    if (m && last && last.prefix.toLowerCase() === m[1].trim().toLowerCase()) last.rest.push(m[2].trim());
+    if (m && last && sameKey(last.prefix) === sameKey(m[1])) last.rest.push(m[2].trim());
     else groups.push(m ? { prefix: m[1].trim(), rest: [m[2].trim()] } : { prefix: site, rest: [] });
   }
   return groups.map((g) => [g.prefix, ...g.rest].join(', ')).join(', ');
 }
 const uniqueTexts = (list) => {
   const seen = new Set();
-  return list.filter((v) => v && !seen.has(v.toLowerCase()) && seen.add(v.toLowerCase()));
+  return list.filter((v) => v && !seen.has(sameKey(v)) && seen.add(sameKey(v)));
 };
 
 /** Reiseanlass aus dem Stundenzettel: Reiseorte (Baustellen) und Tätigkeiten (Art der Arbeit) */
@@ -2064,27 +2076,28 @@ function workParts(value) {
   const last = parts.pop().trim();
   return { done: parts.map((p) => p.trim()).filter(Boolean), last };
 }
-const isKnown = (field, text) => suggestions[field].some((v) => v.toLowerCase() === text.toLowerCase());
+const isKnown = (field, text) => suggestions[field].some((v) => sameKey(v) === sameKey(text));
 
 function suggestionsFor(input) {
   const field = input.dataset.f;
-  let q = input.value.trim().toLowerCase();
+  let q = input.value;
   let used = [];
   if (field === 'work') {
     const { done, last } = workParts(input.value);
-    used = done.map((v) => v.toLowerCase());
+    used = done.map(sameKey);
     // Ein vollständiger Eintrag am Ende gilt als ausgewählt, danach wird alles Übrige vorgeschlagen
     if (last && isKnown('work', last)) {
-      used.push(last.toLowerCase());
+      used.push(sameKey(last));
       q = '';
     } else {
-      q = last.toLowerCase();
+      q = last;
     }
   }
+  // Vergleich ohne Apostrophe, Leerzeichen usw.: „bäckerseck“ findet „Bäcker's Eck“
   const match = (query) =>
     suggestions[field].filter((v) => {
-      const l = v.toLowerCase();
-      return l !== query && !used.includes(l) && (!query || l.includes(query));
+      const k = sameKey(v);
+      return k !== sameKey(query) && !used.includes(k) && (!searchKey(query) || searchKey(v).includes(searchKey(query)));
     });
   let list = match(q);
   // Art der Arbeit: Passt eigener Text zu keinem Vorschlag, trotzdem alle zum Anhängen zeigen
@@ -2092,9 +2105,9 @@ function suggestionsFor(input) {
   if (field === 'work') {
     // Was an der Baustelle dieser Zeile schon gemacht wurde, steht vorne (die häufigsten zuerst)
     const siteInput = input.closest('.row')?.querySelector('[data-f="site"]');
-    const counts = workBySite.get((siteInput ? siteInput.value : '').trim().toLowerCase());
+    const counts = workBySite.get(sameKey(siteInput ? siteInput.value : ''));
     if (counts) {
-      const n = (v) => counts.get(v.toLowerCase()) || 0;
+      const n = (v) => counts.get(sameKey(v)) || 0;
       list = [...list.filter((v) => n(v)).sort((a, b) => n(b) - n(a)), ...list.filter((v) => !n(v))];
     }
   }
@@ -2113,7 +2126,7 @@ function askHideSuggestion(text) {
     () => {
       settings.hiddenSuggestions[field].push(text);
       saveSettings();
-      suggestions[field] = suggestions[field].filter((v) => v.toLowerCase() !== text.toLowerCase());
+      suggestions[field] = suggestions[field].filter((v) => sameKey(v) !== sameKey(text));
       toast('Vorschlag ausgeblendet');
     }
   );
@@ -2166,7 +2179,7 @@ function pickChip(text) {
     const { done, last } = workParts(input.value);
     // Angefangener Text wird durch den Vorschlag ersetzt, ein fertiger Eintrag bleibt stehen
     if (last && isKnown('work', last)) done.push(last);
-    else if (last && !text.toLowerCase().includes(last.toLowerCase())) done.push(last);
+    else if (last && !searchKey(text).includes(searchKey(last))) done.push(last);
     done.push(text);
     // Komma und Leerzeichen gleich mitsetzen, damit direkt weitergeschrieben werden kann
     input.value = `${done.join(', ')}, `;
