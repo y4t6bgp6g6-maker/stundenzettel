@@ -78,6 +78,15 @@ function rowsOutOfOrder(d) {
       if (timed[b].start < timed[a].start) bad.add(timed[a].id).add(timed[b].id);
   return bad;
 }
+/** Zeilen mit Lücke oder Überschneidung zur zeitlich nächsten Zeile – beide werden markiert */
+function rowsGapOrOverlap(d) {
+  const bad = new Set();
+  const timed = d.rows.filter((r) => r.start != null && r.end != null && r.end > r.start).sort((a, b) => a.start - b.start);
+  for (let k = 1; k < timed.length; k++) {
+    if (timed[k].start !== timed[k - 1].end) bad.add(timed[k - 1].id).add(timed[k].id);
+  }
+  return bad;
+}
 /** Ende liegt vor dem Beginn */
 const endBeforeStart = (r) => r.start != null && r.end != null && r.end < r.start;
 /** Feld der Zeile fehlt, sobald am Tag etwas eingetragen ist */
@@ -89,7 +98,7 @@ const dayHasWarning = (d) =>
   (pauseMissing(d) || d.rows.some((r) => timeWarning(d, r) || fieldMissing(d, r, 'site') || fieldMissing(d, r, 'work')));
 const sheetHasWarning = (s) => sheetActiveDays(s).some((i) => dayHasWarning(s.days[i]));
 const timeWarning = (d, r) =>
-  fieldMissing(d, r, 'start') || fieldMissing(d, r, 'end') || endBeforeStart(r) || rowsOutOfOrder(d).has(r.id);
+  fieldMissing(d, r, 'start') || fieldMissing(d, r, 'end') || endBeforeStart(r) || rowsOutOfOrder(d).has(r.id) || rowsGapOrOverlap(d).has(r.id);
 /** Mindestanzahl Zeilen im PDF: Mo–Fr 5, Sa/So 1 */
 const pdfMinRows = (i) => (i < 5 ? 5 : 1);
 
