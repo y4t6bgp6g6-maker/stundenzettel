@@ -795,3 +795,4 @@ button.nav-title { font-size: 17px; padding: 8px 4px; }
 .field > .hidden-sugg { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .field-icon-inline { display: flex; color: var(--muted); flex: none; }
 .chip { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.alert-buttons.single { grid-template-columns: 1fr; }

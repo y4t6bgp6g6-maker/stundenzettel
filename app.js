@@ -1745,9 +1745,10 @@ function renderSettings() {
     <h2 class="section-title">Datensicherung</h2>
     <div class="card list">
       <button class="list-btn" data-act="backup-export">Sicherung speichern …</button>
-      <label class="list-btn">Sicherung einlesen …<input type="file" accept="application/json,.json" data-act-change="backup-import" hidden></label>
+      <label class="list-btn">Sicherung einlesen …<input type="file" multiple data-act-change="backup-import" hidden></label>
     </div>
     <p class="footnote">Deine Zettel sind nur auf diesem iPhone. Speichere ab und zu eine Sicherung in iCloud Drive. Beim Einlesen geht nichts verloren.</p>
+    <p class="footnote">Einlesen geht auch mit Stundenzetteln als Numbers- oder PDF-Datei, auch mehrere auf einmal.</p>
     <p class="footnote center muted">${sheets.length} Stundenzettel gespeichert</p>`;
 }
 
@@ -1779,56 +1780,98 @@ function exportBackup() {
   }
 }
 
+/** Sicherung (JSON) übernehmen; Ergebnis: { added, updated, skipped } */
+function mergeBackup(data) {
+  const incoming = Array.isArray(data) ? data : data.sheets;
+  if (!Array.isArray(incoming) || !incoming.every((s) => s && s.id && s.weekStart && Array.isArray(s.days))) throw new Error('format');
+  // Gleicher Zettel (ID): die zuletzt geänderte Fassung gewinnt, ohne Zeitstempel bleibt die in der App.
+  // Eine Woche, die es in der App schon als anderen Zettel gibt, bleibt unverändert.
+  const weekKey = (s) => `${s.weekStart}|${s.year}|${s.month}`;
+  const byId = new Map(sheets.map((s) => [s.id, s]));
+  const weeks = new Map(sheets.map((s) => [weekKey(s), s.id]));
+  let added = 0;
+  let updated = 0;
+  let skipped = 0;
+  for (const s of incoming) {
+    const owner = weeks.get(weekKey(s));
+    const current = byId.get(s.id);
+    if ((owner && owner !== s.id) || (current && !((s.updatedAt || 0) > (current.updatedAt || 0)))) {
+      skipped++;
+      continue;
+    }
+    if (current) weeks.delete(weekKey(current));
+    byId.set(s.id, s);
+    weeks.set(weekKey(s), s.id);
+    if (current) updated++;
+    else added++;
+  }
+  sheets = [...byId.values()];
+  saveSheets();
+  // Reisekostenabrechnungen: gleiche ID → die zuletzt geänderte Fassung gewinnt
+  if (Array.isArray(data.trips)) {
+    const tripById = new Map(trips.map((t) => [t.id, t]));
+    for (const t of data.trips) {
+      if (!t || !t.id || !Array.isArray(t.dates)) continue;
+      const cur = tripById.get(t.id);
+      if (!cur || (t.updatedAt || 0) > (cur.updatedAt || 0)) tripById.set(t.id, { over: {}, ...t });
+    }
+    trips = [...tripById.values()];
+    saveTrips();
+  }
+  return { added, updated, skipped };
+}
+
+/** Eine oder mehrere Dateien einlesen: Sicherung (.json), Stundenzettel als Numbers-Datei oder PDF */
 async function importBackup(input) {
-  const file = input.files && input.files[0];
+  const files = [...(input.files || [])];
   input.value = '';
-  if (!file) return;
-  try {
-    const data = JSON.parse(await file.text());
-    const incoming = Array.isArray(data) ? data : data.sheets;
-    if (!Array.isArray(incoming) || !incoming.every((s) => s && s.id && s.weekStart && Array.isArray(s.days))) throw new Error('format');
-    // Gleicher Zettel (ID): die zuletzt geänderte Fassung gewinnt, ohne Zeitstempel bleibt die in der App.
-    // Eine Woche, die es in der App schon als anderen Zettel gibt, bleibt unverändert.
-    const weekKey = (s) => `${s.weekStart}|${s.year}|${s.month}`;
-    const byId = new Map(sheets.map((s) => [s.id, s]));
-    const weeks = new Map(sheets.map((s) => [weekKey(s), s.id]));
-    let added = 0;
-    let updated = 0;
-    let skipped = 0;
-    for (const s of incoming) {
-      const owner = weeks.get(weekKey(s));
-      const current = byId.get(s.id);
-      if ((owner && owner !== s.id) || (current && !((s.updatedAt || 0) > (current.updatedAt || 0)))) {
-        skipped++;
+  if (!files.length) return;
+  const lines = [];
+  let total = 0;
+  toast(files.length > 1 ? `${files.length} Dateien werden eingelesen …` : 'Wird eingelesen …', 10000);
+  for (const file of files) {
+    const label = `<b>${escapeHtml(file.name)}</b>`;
+    try {
+      const buf = await file.arrayBuffer();
+      const head = new Uint8Array(buf.slice(0, 1))[0];
+      if (/\.json$/i.test(file.name) || head === 0x7b || head === 0x5b) {
+        const r = mergeBackup(JSON.parse(new TextDecoder().decode(buf)));
+        total += r.added + r.updated;
+        const parts = [`${r.added} Stundenzettel neu`];
+        if (r.updated) parts.push(`${r.updated} aktualisiert`);
+        if (r.skipped) parts.push(`${r.skipped} übersprungen`);
+        lines.push(`${label}: ${parts.join(', ')}`);
         continue;
       }
-      if (current) weeks.delete(weekKey(current));
-      byId.set(s.id, s);
-      weeks.set(weekKey(s), s.id);
-      if (current) updated++;
-      else added++;
-    }
-    sheets = [...byId.values()];
-    saveSheets();
-    // Reisekostenabrechnungen: gleiche ID → die zuletzt geänderte Fassung gewinnt
-    if (Array.isArray(data.trips)) {
-      const tripById = new Map(trips.map((t) => [t.id, t]));
-      for (const t of data.trips) {
-        if (!t || !t.id || !Array.isArray(t.dates)) continue;
-        const cur = tripById.get(t.id);
-        if (!cur || (t.updatedAt || 0) > (cur.updatedAt || 0)) tripById.set(t.id, { over: {}, ...t });
+      const s = await importTimesheetFile(file.name, buf);
+      const existing = existingSheet(sheetFirstDate(s));
+      if (existing) {
+        lines.push(`${label}: übersprungen – für ${fmtShort(sheetFirstDate(s))} – ${fmtShort(sheetLastDate(s))} gibt es schon einen Zettel`);
+        continue;
       }
-      trips = [...tripById.values()];
-      saveTrips();
+      s.sentAt = Date.now(); // eingelesene Zettel gelten als schon gesendet
+      sheets.push(s);
+      saveSheets(s);
+      total++;
+      lines.push(`${label}: ${fmtShort(sheetFirstDate(s))} – ${fmtShort(sheetLastDate(s))}, ${fmtH(sheetTotal(s))}`);
+    } catch (e) {
+      lines.push(`${label}: konnte nicht gelesen werden${e && e.message && e.message !== 'format' ? ` (${escapeHtml(e.message)})` : ''}`);
     }
-    renderSettings();
-    const parts = [`${added} Stundenzettel neu`];
-    if (updated) parts.push(`${updated} aktualisiert`);
-    if (skipped) parts.push(`${skipped} übersprungen (schon vorhanden oder neuer in der App)`);
-    toast(parts.join(', '), 4000);
-  } catch {
-    toast('Diese Datei ist keine gültige Sicherung');
   }
+  document.getElementById('toast').classList.remove('show');
+  if (currentView === 'settings') renderSettings();
+  infoDialog(total ? `${total} Stundenzettel eingelesen` : 'Nichts eingelesen', `<ul class="problem-list">${lines.map((l) => `<li>${l}</li>`).join('')}</ul>`);
+}
+
+function infoDialog(title, message) {
+  const modal = openModal(
+    `<div class="alert-body"><b>${title}</b><div class="alert-msg">${message}</div></div>
+    <div class="alert-buttons single"><button data-c="ok" class="strong">OK</button></div>`,
+    'alert'
+  );
+  modal.addEventListener('click', (e) => {
+    if (e.target.closest('[data-c]')) closeModal();
+  });
 }
 
 // ───────────────────────── Modale Fenster ─────────────────────────
