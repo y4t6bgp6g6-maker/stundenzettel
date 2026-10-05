@@ -785,7 +785,7 @@ function dayHTML(s, i) {
   }
   if (day.status) {
     const credit = dayTotal(day);
-    return `<section class="day status-day status-${day.status} wd-${i}" data-day="${i}">
+    return `<section class="day status-day status-${day.status}" data-day="${i}">
       ${head}
       <div class="status-body">
         <b>${DAY_STATUS[day.status]}</b>
