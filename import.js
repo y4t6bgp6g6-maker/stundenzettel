@@ -27,6 +27,9 @@ function weekdayIndex(text) {
   return ['mo', 'di', 'mi', 'do', 'fr', 'sa', 'so'].indexOf(t.replace(/\.$/, ''));
 }
 
+/** Wochentag am Anfang entfernen: „Donnerstag frei“ → „frei“ */
+const stripWeekday = (text) => String(text || '').trim().replace(/^[a-zäöü]+\.?/i, (w) => (weekdayIndex(w) >= 0 ? '' : w)).trim();
+
 /** „08:00“, „8.30“, „8:30 Uhr“ → Minuten */
 function parseClock(text) {
   const m = String(text || '').match(/(\d{1,2})[:.](\d{2})/);
@@ -57,14 +60,48 @@ function parseDateText(text) {
   return new Date(y, Number(m[2]) - 1, Number(m[1]));
 }
 
-/** Tagesart aus einem Text in Baustelle/Art der Arbeit, z. B. „Frei“ */
+// Wörter für Urlaub, Krankheit, Feiertag und freie Tage (nur diese Formen, „Krankenhaus“ oder „Freiburg“ zählen nicht)
+const STATUS_WORDS = [
+  ['urlaub', /^(urlaub|urlaubstag|urlaubstage|resturlaub|jahresurlaub)$/],
+  ['krank', /^(krank|krankheit|krankheitstag|krankgeschrieben|krankmeldung|krankgemeldet|krankenschein|au)$/],
+  ['feiertag', /^(feiertag|feiertage)$/],
+  ['frei', /^(frei|freier|überstundenfrei|gleitzeit|zeitausgleich)$/],
+];
+const statusOfWord = (w) => (STATUS_WORDS.find(([, re]) => re.test(w)) || [])[0] || null;
+const words = (text) => String(text || '').toLowerCase().split(/[^a-zäöüß]+/).filter(Boolean);
+
+/** Tagesart, wenn das Wort irgendwo im Text steht (z. B. „heute krank“) */
 function statusFromText(text) {
-  const t = String(text || '').trim().toLowerCase();
-  if (/^frei\b/.test(t)) return 'frei';
-  if (/^urlaub/.test(t)) return 'urlaub';
-  if (/^krank/.test(t)) return 'krank';
-  if (/^feiertag/.test(t)) return 'feiertag';
+  for (const w of words(text)) {
+    if (w === 'au') continue; // „AU“ nur als ganzer Eintrag, siehe statusOnlyText
+    const st = statusOfWord(w);
+    if (st) return st;
+  }
   return null;
+}
+
+/** Tagesart, wenn der Text nur daraus besteht (z. B. „Urlaub“, „Gesetzlicher Feiertag“, „Freier Tag“) */
+function statusOnlyText(text) {
+  const ws = words(text).filter((w) => !['gesetzlicher', 'tag', 'ganzer', 'halber', 'bezahlter', 'unbezahlter'].includes(w));
+  return ws.length === 1 ? statusOfWord(ws[0]) : null;
+}
+
+/** Am Ende eines Tages: „Urlaub“, „Krank“ usw. in irgendeiner Spalte → Tagesart.
+ *  Ohne Uhrzeiten reicht das Wort irgendwo; mit Uhrzeiten (eingetragen, damit die Stunden zählen)
+ *  muss eine Zelle nur aus dem Wort bestehen, damit „Kollege krank, Vertretung“ ein Arbeitstag bleibt. */
+function finishDay(day) {
+  const texts = day.texts || [];
+  delete day.texts;
+  if (day.status) return;
+  const hasTimes = day.rows.some((r) => r.start != null || r.end != null);
+  for (const t of texts) {
+    const status = hasTimes ? statusOnlyText(t) : statusOnlyText(t) || statusFromText(t);
+    if (status) {
+      day.status = status;
+      day.rows = [];
+      return;
+    }
+  }
 }
 
 /** Spalte anhand der Überschrift erkennen */
@@ -417,27 +454,29 @@ function gridToParsed(grid) {
     if (row.some((c) => STOP_WORDS.test(cellText(c)))) break;
     const day = cols.day != null ? weekdayIndex(cellText(row[cols.day])) : -1;
     if (day >= 0) {
-      current = { day, rows: [], pause: null, status: null };
+      if (current) finishDay(current);
+      current = { day, rows: [], pause: null, status: null, texts: [] };
       result.days.push(current);
     }
     if (!current) continue;
+    // Alle Texte der Zeile (jede Spalte, in der Spalte „Tag“ ohne den Wochentag) für Urlaub/Krank/Frei/Feiertag
+    row.forEach((c, ci) => {
+      const t = ci === cols.day ? stripWeekday(cellText(c)) : cellText(c);
+      if (t) current.texts.push(t);
+    });
     const get = (k) => (cols[k] != null ? row[cols[k]] : null);
     const pause = cellPause(get('pause'));
     if (pause != null && current.pause == null) current.pause = pause;
     const entry = { start: cellClock(get('start')), end: cellClock(get('end')), site: cellText(get('site')), work: cellText(get('work')) };
     addEntry(current, entry);
   }
+  if (current) finishDay(current);
   return result;
 }
 
 /** Zeile zum Tag hinzufügen; „Frei“, „Urlaub“ usw. ohne Uhrzeiten werden zur Tagesart */
 function addEntry(day, e) {
   if (e.start == null && e.end == null && !e.site && !e.work) return;
-  const status = e.start == null && e.end == null ? statusFromText(e.site) || statusFromText(e.work) : null;
-  if (status && !day.rows.length) {
-    day.status = status;
-    return;
-  }
   day.rows.push(e);
 }
 
@@ -758,7 +797,7 @@ function pdfItemsToParsed(items) {
   const body = lines.filter((l) => l.y > headerLine.y + 2);
   const stop = body.findIndex((l) => l.items.some((it) => STOP_WORDS.test(it.text)));
   const rows = (stop >= 0 ? body.slice(0, stop) : body).map((l) => {
-    const r = { y: l.y, size: Math.max(...l.items.map((it) => it.size)) };
+    const r = { y: l.y, size: Math.max(...l.items.map((it) => it.size)), all: l.items.map((it) => it.text) };
     for (const it of l.items) {
       const k = kindAt(it.x);
       if (k) r[k] = r[k] ? `${r[k]} ${it.text}` : it.text;
@@ -780,10 +819,11 @@ function pdfItemsToParsed(items) {
     return { day: l.day, top: l.y - 3, bottom: next ? next.y - 3 : Infinity };
   });
   for (const b of bounds) {
-    const day = { day: b.day, rows: [], pause: null, status: null };
+    const day = { day: b.day, rows: [], pause: null, status: null, texts: [] };
     let last = null;
     for (const r of rows) {
       if (r.y < b.top || r.y >= b.bottom) continue;
+      day.texts.push(...r.all.map(stripWeekday).filter(Boolean));
       if (r.pause && day.pause == null) day.pause = parseDuration(r.pause);
       const e = { start: parseClock(r.start), end: parseClock(r.end), site: r.site || '', work: r.work || '' };
       // Umbrochener Text (zweite Zeile derselben Zelle) gehört zur Zeile darüber
@@ -796,6 +836,7 @@ function pdfItemsToParsed(items) {
       addEntry(day, e);
       if (day.rows.length > before) last = { y: r.y, e };
     }
+    finishDay(day);
     result.days.push(day);
   }
   return result;
