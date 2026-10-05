@@ -871,4 +871,6 @@ button.nav-title { font-size: 17px; }
 .field > .hidden-sugg { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .field-icon-inline { display: flex; color: var(--muted); flex: none; }
 .chip { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+/* Keine Link-Vorschau von Safari beim langen Drücken auf Einträge (bricht sonst die Berührung beim Scrollen ab) */
+a.list-row, a.card { -webkit-touch-callout: none; }
 .alert-buttons.single { grid-template-columns: 1fr; }

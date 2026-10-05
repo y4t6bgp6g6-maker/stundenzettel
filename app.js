@@ -2228,7 +2228,13 @@ function dismissKeyboardOnScroll() {
 }
 document.addEventListener(
   'touchstart',
-  (e) => (scrollTouch = e.touches.length === 1 ? { y: e.touches[0].clientY, target: e.target } : null),
+  (e) => {
+    scrollTouch = e.touches.length === 1 ? { y: e.touches[0].clientY, target: e.target } : null;
+    // In der Suche schließt schon das Berühren der Ergebnisliste die Tastatur (vor dem Scrollen, das iOS
+    // auf Listeneinträgen bei langsamem Start nicht zuverlässig meldet)
+    const el = typingField();
+    if (el && el.matches('[data-search]') && !e.target.closest('.nav')) el.blur();
+  },
   { passive: true }
 );
 document.addEventListener(
@@ -2238,9 +2244,11 @@ document.addEventListener(
   },
   { passive: true }
 );
-const endScrollTouch = () => (scrollTouch = null);
-document.addEventListener('touchend', endScrollTouch, { passive: true });
-document.addEventListener('touchcancel', endScrollTouch, { passive: true });
+// Nur touchend beendet die Geste: Bei langsamem Start auf einem Listeneintrag (Link) bricht iOS die Berührung
+// mit touchcancel ab, scrollt aber weiter, solange der Finger aufliegt
+document.addEventListener('touchend', () => (scrollTouch = null), { passive: true });
+// Wechsel ins nächste Feld (Pfeile über der Tastatur) scrollt ebenfalls – das soll die Tastatur nicht schließen
+document.addEventListener('focusin', () => (scrollTouch = null));
 window.addEventListener('scroll', dismissKeyboardOnScroll, { passive: true });
 if (window.visualViewport) visualViewport.addEventListener('scroll', dismissKeyboardOnScroll);
 if (window.visualViewport) {
