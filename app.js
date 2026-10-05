@@ -629,8 +629,8 @@ function renderStats() {
   const years = [...stats.keys()].sort((a, b) => b - a);
   app.innerHTML = `
     <header class="nav">
-      <button class="nav-btn back" data-act="back">${ICON.back}<span>Zettel</span></button>
-      <span class="nav-title">Übersicht</span>
+      <button class="nav-btn back" data-act="back" aria-label="Zurück">${ICON.back}</button>
+      <span class="nav-title"></span>
       <span class="nav-btn"></span>
     </header>
     ${years
@@ -732,7 +732,7 @@ function renderEditor(id) {
 
   app.innerHTML = `
     <header class="nav">
-      <button class="nav-btn back" data-act="back">${ICON.back}<span>Zettel</span></button>
+      <button class="nav-btn back" data-act="back" aria-label="Zurück">${ICON.back}</button>
       <button class="nav-title" data-act="week" id="nav-title">${fmtShort(sheetFirstDate(s))} – ${fmtShort(sheetLastDate(s))}</button>
       <span class="nav-actions">
         <button class="nav-btn" data-act="share" aria-label="Als PDF senden">${ICON.share}</button>
@@ -1248,7 +1248,7 @@ function renderTripList() {
   const keys = [...groups.keys()].sort((a, b) => b - a);
   app.innerHTML = `
     <header class="nav">
-      <button class="nav-btn back" data-act="back">${ICON.back}<span>Zettel</span></button>
+      <button class="nav-btn back" data-act="back" aria-label="Zurück">${ICON.back}</button>
       <span class="nav-title"></span>
       <span class="nav-btn"></span>
     </header>
@@ -1326,7 +1326,7 @@ function renderTrip(id) {
   tripId = id;
   app.innerHTML = `
     <header class="nav">
-      <button class="nav-btn back" data-act="back">${ICON.back}<span>Zettel</span></button>
+      <button class="nav-btn back" data-act="back" aria-label="Zurück">${ICON.back}</button>
       <span class="nav-title">Reisekosten</span>
       <span class="nav-actions">
         <button class="nav-btn" data-act="trip-share" aria-label="Als PDF senden">${ICON.share}</button>
@@ -1661,7 +1661,7 @@ function signaturePad() {
 function renderSettings() {
   app.innerHTML = `
     <header class="nav">
-      <button class="nav-btn back" data-act="back">${ICON.back}<span>Zettel</span></button>
+      <button class="nav-btn back" data-act="back" aria-label="Zurück">${ICON.back}</button>
       <span class="nav-title">Einstellungen</span>
       <span class="nav-btn"></span>
     </header>
@@ -2196,10 +2196,22 @@ function placeSuggestBar(keepVisible = true) {
     if (r.bottom > top - 8) window.scrollBy(0, r.bottom - top + 16);
   }
 }
+/** Bei offener Tastatur verschiebt iOS den sichtbaren Ausschnitt; die feste Kopfzeile (z. B. die Suche) bleibt oben im Bild */
+function placeNav() {
+  const nav = document.querySelector('.nav');
+  const y = window.visualViewport ? Math.max(0, visualViewport.offsetTop) : 0;
+  if (nav) nav.style.transform = y ? `translate3d(0, ${y}px, 0)` : '';
+}
 if (window.visualViewport) {
   // Beim Scrollen nur mitziehen, sofort und ohne die Seite zu verschieben (sonst zittert die Leiste)
-  visualViewport.addEventListener('resize', () => placeSuggestBar());
-  visualViewport.addEventListener('scroll', () => placeSuggestBar(false));
+  visualViewport.addEventListener('resize', () => {
+    placeSuggestBar();
+    placeNav();
+  });
+  visualViewport.addEventListener('scroll', () => {
+    placeSuggestBar(false);
+    placeNav();
+  });
 }
 
 /** Vorschlag übernehmen: Baustelle ersetzt und schließt, Art der Arbeit hängt mit Komma an */
