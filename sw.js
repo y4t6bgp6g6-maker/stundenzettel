@@ -1,5 +1,5 @@
 // Offline-Cache: Mit Internet wird immer die neueste Version geladen, ohne Internet die gespeicherte.
-const CACHE = 'stundenzettel-v51';
+const CACHE = 'stundenzettel-v52';
 const ASSETS = [
   './',
   'index.html',

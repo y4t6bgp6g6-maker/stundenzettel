@@ -451,7 +451,7 @@ function goBack() {
 function renderList() {
   const searching = searchQuery != null;
   app.innerHTML = `
-    <header class="nav">
+    <header class="nav${searching ? '' : ' nav-float'}">
       ${
         searching
           ? `<div class="search-bar">
