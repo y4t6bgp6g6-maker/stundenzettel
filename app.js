@@ -373,6 +373,10 @@ const ICON = {
   pin: svg('<path d="M12 21s-6-5.3-6-10a6 6 0 0 1 12 0c0 4.7-6 10-6 10z"/><circle cx="12" cy="11" r="2.2"/>', 15),
   suitcaseSmall: svg('<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 13h18"/>', 16),
   suitcase: svg('<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 13h18"/>', 22),
+  urlaub: svg('<path d="M12 4a8 8 0 0 1 8 8H4a8 8 0 0 1 8-8z"/><path d="M12 12v7a2 2 0 0 0 4 0"/>', 14),
+  krank: svg('<path d="M14 14.8V5a2 2 0 0 0-4 0v9.8a4 4 0 1 0 4 0z"/>', 14),
+  feiertag: svg('<path d="M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.4l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/>', 14),
+  frei: svg('<path d="M4 9h12v4a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5z"/><path d="M16 10h1.5a2 2 0 0 1 0 4H16M8 4v2M12 4v2"/>', 14),
   tool: svg('<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3.6 17.4a1.4 1.4 0 0 0 2 2l5.7-5.7a4 4 0 0 0 5.4-5.4l-2.4 2.4-2-2z"/>', 15),
 };
 
@@ -784,15 +788,14 @@ function dayHTML(s, i) {
     </section>`;
   }
   if (day.status) {
+    // Kompakte Zeile: Wochentag links, rechts farbiges Etikett (zugleich Auswahl der Tagesart)
     const credit = dayTotal(day);
+    const holiday = day.status === 'feiertag' ? holidayName(date) : '';
     return `<section class="day status-day status-${day.status}" data-day="${i}">
-      ${head}
-      <div class="status-body">
-        <b>${DAY_STATUS[day.status]}</b>
-        ${day.status === 'feiertag' && holidayName(date) ? `<span>${holidayName(date)}</span>` : ''}
-        <span class="muted">${credit ? `${fmtH(credit)} gutgeschrieben` : 'keine Stunden gutgeschrieben'}</span>
+      <div class="day-head status-head">
+        <div class="status-when"><b>${WEEKDAYS[i]}</b> <span class="muted">${fmtDayMonth(date)}${holiday ? ` · ${escapeHtml(holiday)}` : ''}</span></div>
+        <button class="chip-btn status-btn set status-tag" data-act="status">${ICON[day.status]} ${DAY_STATUS_SHORT[day.status]} · ${fmtH(credit)} ▾</button>
       </div>
-      <div class="day-foot"><span class="day-total">Gesamt <b>${fmtH(credit)}</b></span></div>
     </section>`;
   }
   return `<section class="day wd-${i}" data-day="${i}">

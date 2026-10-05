@@ -205,7 +205,17 @@ input { font: inherit; color: inherit; }
 /* Tage */
 .day { background: var(--card); border-radius: 12px; margin-top: 16px; overflow: visible; }
 /* Feste Farbe je Wochentag: Streifen links (Arbeitstage) */
-.day[class*="wd-"] { box-shadow: inset 4px 0 0 var(--wd); }
+.day[class*="wd-"] { position: relative; }
+/* eigene Ebene über den Zeilen (die haben fürs Verschieben einen eigenen Hintergrund) */
+.day[class*="wd-"]::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  box-shadow: inset 4px 0 0 var(--wd);
+  pointer-events: none;
+  z-index: 2;
+}
 .wd-0 { --wd: #007aff; }
 .wd-1 { --wd: #ff9500; }
 .wd-2 { --wd: #30b0c7; }
@@ -510,7 +520,18 @@ input { font: inherit; color: inherit; }
 .status-feiertag { --status: #af52de; }
 .status-frei { --status: #8e8e93; }
 .status-btn.set { background: var(--status); }
-.status-day { box-shadow: inset 4px 0 0 var(--status); }
+/* Tage mit Tagesart: kompakte Zeile mit getöntem Etikett */
+.status-head { border-bottom: 0; padding: 10px 12px 10px 14px; gap: 10px; }
+.status-when { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-btn.set.status-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  background: color-mix(in srgb, var(--status) 16%, transparent);
+  color: color-mix(in srgb, var(--status) 72%, var(--text));
+  font-variant-numeric: tabular-nums;
+}
 .status-body { display: flex; flex-direction: column; gap: 2px; padding: 14px 14px 4px; }
 .status-body b { font-size: 19px; }
 .status-body .muted { font-size: 14px; }
