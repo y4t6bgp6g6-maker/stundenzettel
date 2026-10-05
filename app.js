@@ -608,7 +608,7 @@ const fmtDays = (n) => `${fmtNum(n)} ${n === 1 ? 'Tag' : 'Tage'}`;
 function statsCardHTML() {
   const year = new Date().getFullYear();
   const st = absenceStats().get(year) || { urlaub: 0, krank: 0 };
-  return `<a class="card stats-card" href="#/uebersicht">
+  return `<a draggable="false" class="card stats-card" href="#/uebersicht">
     <span class="stats-year">${year}</span>
     <span class="stats-item"><span class="stats-num">${st.urlaub}</span><span class="stats-label">${st.urlaub === 1 ? 'Urlaubstag' : 'Urlaubstage'}</span></span>
     <span class="stats-item"><span class="stats-num">${st.krank}</span><span class="stats-label">${st.krank === 1 ? 'Krankheitstag' : 'Krankheitstage'}</span></span>
@@ -668,7 +668,7 @@ function tripYearStats() {
 }
 
 function tripYearHTML(st) {
-  return `<a class="card form trip-year" href="#/reisekosten">
+  return `<a draggable="false" class="card form trip-year" href="#/reisekosten">
     <div class="field"><span>Tage auf Montage</span><b>${fmtDays(st.days)}</b></div>
     <div class="field"><span>Spesen</span><b>${fmtEuro(st.sum)}</b></div>
   </a>`;
@@ -695,7 +695,7 @@ function listRowHTML(s, hit) {
   const sent = !!s.sentAt;
   return `<div class="swipe">
     <div class="swipe-track">
-      <a class="list-row" href="#/zettel/${encodeURIComponent(s.id)}">
+      <a draggable="false" class="list-row" href="#/zettel/${encodeURIComponent(s.id)}">
         <span class="status ${sent ? 'sent' : 'open'}">${sent ? ICON.check : ''}</span>
         <span class="list-main">
           <span class="list-title">${fmtShort(sheetFirstDate(s))} – ${fmtShort(sheetLastDate(s))}${sheetHasWarning(s) ? ' <span class="list-warn">⚠️</span>' : ''}${
@@ -1224,7 +1224,7 @@ function dropEmptyTrip() {
 function tripsCardHTML() {
   const list = trips.filter((t) => t.dates.length);
   const open = list.filter((t) => !t.sentAt).length;
-  return `<a class="card stats-card trips-card" href="#/reisekosten">
+  return `<a draggable="false" class="card stats-card trips-card" href="#/reisekosten">
     <span class="trips-icon">${ICON.suitcase}</span>
     <span class="stats-item"><span class="trips-title">Reisekosten</span><span class="stats-label">${
       list.length ? `${list.length} ${list.length === 1 ? 'Abrechnung' : 'Abrechnungen'}${open ? ` · ${open} offen` : ''}` : 'Noch keine Abrechnung'
@@ -1287,7 +1287,7 @@ function tripRowHTML(t) {
   );
   return `<div class="swipe">
     <div class="swipe-track">
-      <a class="list-row" href="#/reise/${encodeURIComponent(t.id)}">
+      <a draggable="false" class="list-row" href="#/reise/${encodeURIComponent(t.id)}">
         <span class="status ${sent ? 'sent' : 'open'}">${sent ? ICON.check : ''}</span>
         <span class="list-main">
           <span class="list-title">${fmtShort(tripFirstDate(t))} – ${fmtShort(tripLastDate(t))}</span>
