@@ -406,26 +406,32 @@ function route() {
   if (tm) {
     currentView = 'trip';
     renderTrip(decodeURIComponent(tm[1]));
+    syncNav();
     window.scrollTo(0, 0);
   } else if (m) {
     currentView = 'editor';
     renderEditor(decodeURIComponent(m[1]));
+    syncNav();
     window.scrollTo(0, 0);
   } else if (hash === '#/einstellungen') {
     currentView = 'settings';
     renderSettings();
+    syncNav();
     window.scrollTo(0, 0);
   } else if (hash === '#/reisekosten') {
     currentView = 'trips';
     renderTripList();
+    syncNav();
     window.scrollTo(0, 0);
   } else if (hash === '#/uebersicht') {
     currentView = 'stats';
     renderStats();
+    syncNav();
     window.scrollTo(0, 0);
   } else {
     currentView = 'list';
     renderList();
+    syncNav();
     if (pendingMonth) {
       const key = pendingMonth;
       pendingMonth = null;
@@ -572,6 +578,17 @@ function refreshListBody() {
 
 /** Höhe der festen Kopfzeile, damit Sprungziele nicht darunter verschwinden */
 const navHeight = () => document.querySelector('.nav')?.offsetHeight || 0;
+
+/** Die Kopfzeile ist fest (position: fixed), weil iOS eine haftende Kopfzeile beim Nachfedern am Seitenende
+ *  mit wegschiebt. Der Inhalt bekommt oben Platz in ihrer Höhe (--nav-h), auch wenn sie ihre Höhe ändert. */
+const navResize = new ResizeObserver(() => document.documentElement.style.setProperty('--nav-h', `${navHeight()}px`));
+function syncNav() {
+  const nav = document.querySelector('.nav');
+  document.documentElement.style.setProperty('--nav-h', `${navHeight()}px`);
+  navResize.disconnect();
+  if (nav) navResize.observe(nav);
+}
+new MutationObserver(syncNav).observe(app, { childList: true });
 
 function scrollToMonth(key) {
   const el = document.getElementById(`m-${key}`);

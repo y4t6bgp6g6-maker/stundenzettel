@@ -50,18 +50,21 @@ input { font: inherit; color: inherit; }
 #app {
   max-width: 640px;
   margin: 0 auto;
-  padding: 0 16px calc(96px + env(safe-area-inset-bottom));
+  padding: var(--nav-h, calc(env(safe-area-inset-top) + 56px)) 16px calc(96px + env(safe-area-inset-bottom));
 }
 
 /* Navigationsleiste: kein Balken, Hintergrund läuft unten weich aus, Knöpfe als runde Glasknöpfe */
 .nav {
-  position: sticky;
+  position: fixed;
   top: 0;
+  left: 0;
+  right: 0;
+  max-width: 672px;
   z-index: 10;
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  margin: 0 -16px;
+  margin: 0 auto;
   padding: calc(env(safe-area-inset-top) + 6px) 16px 6px;
   min-height: calc(env(safe-area-inset-top) + 56px);
 }
