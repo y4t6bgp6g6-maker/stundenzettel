@@ -1745,7 +1745,7 @@ function renderSettings() {
     <h2 class="section-title">Datensicherung</h2>
     <div class="card list">
       <button class="list-btn" data-act="backup-export">Sicherung speichern …</button>
-      <label class="list-btn">Sicherung einlesen …<input type="file" multiple data-act-change="backup-import" hidden></label>
+      <label class="list-btn">Sicherung einlesen …<input type="file" multiple accept=".json,.numbers,.pdf,application/json,application/pdf,application/vnd.apple.numbers,application/x-iwork-numbers-sffnumbers" data-act-change="backup-import" hidden></label>
     </div>
     <p class="footnote">Deine Zettel sind nur auf diesem iPhone. Speichere ab und zu eine Sicherung in iCloud Drive. Beim Einlesen geht nichts verloren.</p>
     <p class="footnote">Einlesen geht auch mit Stundenzetteln als Numbers- oder PDF-Datei, auch mehrere auf einmal.</p>
