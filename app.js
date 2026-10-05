@@ -2111,6 +2111,9 @@ function suggestionsFor(input) {
       list = [...list.filter((v) => n(v)).sort((a, b) => n(b) - n(a)), ...list.filter((v) => !n(v))];
     }
   }
+  // Was mit dem getippten Text beginnt, steht vor dem, was ihn nur irgendwo enthält (Reihenfolge sonst wie oben)
+  const typed = searchKey(q);
+  if (typed) list = [...list.filter((v) => searchKey(v).startsWith(typed)), ...list.filter((v) => !searchKey(v).startsWith(typed))];
   return list;
 }
 
