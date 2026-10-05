@@ -2205,22 +2205,37 @@ function placeNav() {
   const y = keyboardOpen() ? Math.max(0, visualViewport.offsetTop) : 0;
   if (nav) nav.style.transform = y ? `translate3d(0, ${y}px, 0)` : '';
 }
-/** Wie in iOS-Apps: Ziehen am Inhalt schließt die Tastatur (mit Tastatur würden die festen Leisten beim Scrollen zittern) */
-let scrollTouchY = null;
-document.addEventListener('touchstart', (e) => (scrollTouchY = e.touches.length === 1 ? e.touches[0].clientY : null), { passive: true });
+/** Wie in iOS-Apps: Ziehen am Inhalt schließt die Tastatur (mit Tastatur würden die festen Leisten beim Scrollen zittern).
+ *  Langsames Ziehen meldet iOS teils kaum über touchmove – daher zählt auch jedes Scrollen, solange der Finger aufliegt. */
+let scrollTouch = null; // { y, target }
+const typingField = () => {
+  const el = document.activeElement;
+  return el && el.matches('input, textarea') ? el : null;
+};
+function dismissKeyboardOnScroll() {
+  const el = typingField();
+  if (!scrollTouch || drag || !el) return;
+  if (scrollTouch.target === el || scrollTouch.target.closest?.('#suggest-bar')) return;
+  scrollTouch = null;
+  el.blur();
+}
+document.addEventListener(
+  'touchstart',
+  (e) => (scrollTouch = e.touches.length === 1 ? { y: e.touches[0].clientY, target: e.target } : null),
+  { passive: true }
+);
 document.addEventListener(
   'touchmove',
   (e) => {
-    const el = document.activeElement;
-    if (scrollTouchY == null || drag || !el || !el.matches('input, textarea') || !keyboardOpen()) return;
-    if (e.target === el || e.target.closest('#suggest-bar')) return;
-    if (Math.abs(e.touches[0].clientY - scrollTouchY) > 12) {
-      scrollTouchY = null;
-      el.blur();
-    }
+    if (scrollTouch && Math.abs(e.touches[0].clientY - scrollTouch.y) > 6) dismissKeyboardOnScroll();
   },
   { passive: true }
 );
+const endScrollTouch = () => (scrollTouch = null);
+document.addEventListener('touchend', endScrollTouch, { passive: true });
+document.addEventListener('touchcancel', endScrollTouch, { passive: true });
+window.addEventListener('scroll', dismissKeyboardOnScroll, { passive: true });
+if (window.visualViewport) visualViewport.addEventListener('scroll', dismissKeyboardOnScroll);
 if (window.visualViewport) {
   // Beim Scrollen nur mitziehen, sofort und ohne die Seite zu verschieben (sonst zittert die Leiste)
   visualViewport.addEventListener('resize', () => {
