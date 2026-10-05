@@ -108,7 +108,8 @@ input { font: inherit; color: inherit; }
 .search-field,
 .daybar,
 .primary,
-.to-top {
+.to-top,
+.sum-pill {
   border-radius: 22px;
   background: color-mix(in srgb, var(--card) 72%, transparent);
   -webkit-backdrop-filter: saturate(180%) blur(20px);
@@ -371,6 +372,24 @@ input { font: inherit; color: inherit; }
   font-variant-numeric: tabular-nums;
 }
 .sum-row + .sum-row { border-top: 0.5px solid var(--sep); }
+/* Stunden Gesamt und Überstunden im Zettel: feste Glas-Kapseln unten */
+.sum-bar { gap: 10px; }
+.sum-pill {
+  flex: 1;
+  max-width: 299px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 52px;
+  padding: 5px 8px;
+  border-radius: 26px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.sum-label { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.sum-pill b { font-size: 17px; }
 
 /* Fester Knopf unten */
 .bottom-bar {

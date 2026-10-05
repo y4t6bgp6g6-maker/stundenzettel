@@ -741,7 +741,7 @@ function renderEditor(id) {
       <div class="daybar" id="daybar">${dayBarHTML(s)}</div>
     </header>
     <div id="days">${daysHTML(s)}</div>
-    <div class="card summary" id="summary">${summaryHTML(s)}</div>`;
+    <div class="bottom-bar sum-bar" id="summary">${summaryHTML(s)}</div>`;
 }
 
 /** Kurze Stundenangabe für die Tagesleiste: „9,5“ bzw. „9:30“ */
@@ -866,10 +866,10 @@ function rowHTML(day, r) {
 }
 
 function summaryHTML(s) {
-  let html = `<div class="sum-row"><span>Stunden Gesamt</span><b>${fmtH(sheetTotal(s))}</b></div>`;
+  let html = `<div class="sum-pill"><span class="sum-label">Stunden Gesamt</span><b>${fmtH(sheetTotal(s))}</b></div>`;
   if (settings.overtime) {
     const target = sheetTarget(s);
-    html += `<div class="sum-row"><span>Überstunden <span class="muted">(ab ${fmtH(Math.round(target * 60))})</span></span><b>${fmtH(sheetOvertime(s, target))}</b></div>`;
+    html += `<div class="sum-pill"><span class="sum-label">Überstunden (ab ${fmtH(Math.round(target * 60))})</span><b>${fmtH(sheetOvertime(s, target))}</b></div>`;
   }
   return html;
 }
