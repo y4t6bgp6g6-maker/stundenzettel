@@ -204,21 +204,8 @@ input { font: inherit; color: inherit; }
 
 /* Tage */
 .day { background: var(--card); border-radius: 12px; margin-top: 16px; overflow: visible; }
-/* Feste Farbe je Wochentag: Dreieck in der Ecke oben links */
-.day[class*="wd-"] { position: relative; }
-.day[class*="wd-"]::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 0;
-  height: 0;
-  border-top: 20px solid var(--wd);
-  border-right: 20px solid transparent;
-  border-top-left-radius: 12px;
-  pointer-events: none;
-  z-index: 1;
-}
+/* Feste Farbe je Wochentag: Streifen links (Arbeitstage) */
+.day[class*="wd-"] { box-shadow: inset 4px 0 0 var(--wd); }
 .wd-0 { --wd: #007aff; }
 .wd-1 { --wd: #ff9500; }
 .wd-2 { --wd: #30b0c7; }
