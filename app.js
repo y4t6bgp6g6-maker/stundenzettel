@@ -159,7 +159,6 @@ const DEFAULT_SETTINGS = {
   prorateTarget: false,
   place: '',
   signature: null,
-  vacationDays: 0,
   hiddenSuggestions: { site: [], work: [] },
 };
 
@@ -180,6 +179,11 @@ delete settings.recipient; // frühere Einstellungen, werden nicht mehr verwende
 delete settings.pdfFrame;
 delete settings.accountStart;
 delete settings.dayBar;
+// Fest vorgegeben (keine Einstellung mehr): 40 Stunden pro Woche, 8 Stunden pro Tag, Niedersachsen
+settings.target = 40;
+settings.hoursPerDay = 8;
+settings.state = 'NI';
+delete settings.vacationDays;
 
 /** Urlaubs- und Krankheitstage je Jahr (nach Datum des Tages) */
 function absenceStats() {
@@ -589,9 +593,7 @@ function statsCardHTML() {
   const st = absenceStats().get(year) || { urlaub: 0, krank: 0 };
   return `<a class="card stats-card" href="#/uebersicht">
     <span class="stats-year">${year}</span>
-    <span class="stats-item"><span class="stats-num">${st.urlaub}</span><span class="stats-label">${st.urlaub === 1 ? 'Urlaubstag' : 'Urlaubstage'}${
-      settings.vacationDays > 0 ? ` · ${fmtNum(settings.vacationDays - st.urlaub)} übrig` : ''
-    }</span></span>
+    <span class="stats-item"><span class="stats-num">${st.urlaub}</span><span class="stats-label">${st.urlaub === 1 ? 'Urlaubstag' : 'Urlaubstage'}</span></span>
     <span class="stats-item"><span class="stats-num">${st.krank}</span><span class="stats-label">${st.krank === 1 ? 'Krankheitstag' : 'Krankheitstage'}</span></span>
     <span class="list-chevron">${ICON.chevronRight}</span>
   </a>`;
@@ -619,8 +621,7 @@ function renderStats() {
         const st = stats.get(y);
         return `<h2 class="section-title">${y}${y === current ? ' (laufendes Jahr)' : ''}</h2>
         <div class="card form">
-          <div class="field"><span>Urlaubstage</span><b>${fmtDays(st.urlaub)}${settings.vacationDays > 0 ? ` <span class="muted">von ${fmtNum(settings.vacationDays)}</span>` : ''}</b></div>
-          ${settings.vacationDays > 0 ? `<div class="field"><span>Resturlaub</span><b class="${settings.vacationDays - st.urlaub < 0 ? 'minus' : ''}">${fmtDays(settings.vacationDays - st.urlaub)}</b></div>` : ''}
+          <div class="field"><span>Urlaubstage</span><b>${fmtDays(st.urlaub)}</b></div>
           <div class="field"><span>Krankheitstage</span><b>${fmtDays(st.krank)}</b></div>
         </div>
         ${travel.has(y) ? tripYearHTML(travel.get(y)) : ''}
@@ -1568,43 +1569,10 @@ function signatureSVG(sig, height = 44) {
   return `<svg class="sig-preview" viewBox="0 0 100 ${(ratio * 100).toFixed(1)}" height="${height}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
 }
 
-// Unterschrift als Text über die Zwischenablage weitergeben (z. B. iPad → iPhone mit gleicher Apple-ID)
-const SIG_PREFIX = 'Stundenzettel-Unterschrift:';
-
-function copySignature() {
-  const text = SIG_PREFIX + JSON.stringify(settings.signature);
-  // direkt im Antippen: Safari erlaubt die Zwischenablage nur dort
-  navigator.clipboard.writeText(text).then(
-    () => toast('Unterschrift kopiert – jetzt auf dem iPhone einsetzen', 3500),
-    () => toast('Kopieren hat nicht geklappt')
-  );
-}
-
-function pasteSignature() {
-  if (!navigator.clipboard || !navigator.clipboard.readText) return toast('Einsetzen geht hier leider nicht');
-  navigator.clipboard.readText().then(
-    (text) => {
-      let sig = null;
-      try {
-        const t = text.trim();
-        if (t.startsWith(SIG_PREFIX)) sig = JSON.parse(t.slice(SIG_PREFIX.length));
-      } catch {}
-      const valid =
-        sig && typeof sig.ratio === 'number' && Array.isArray(sig.strokes) && sig.strokes.length &&
-        sig.strokes.every((st) => Array.isArray(st) && st.every((p) => Array.isArray(p) && p.length === 2 && p.every(Number.isFinite)));
-      if (!valid) return toast('In der Zwischenablage ist keine Unterschrift. Zuerst auf dem anderen Gerät „Unterschrift kopieren“.', 4500);
-      const apply = () => {
-        settings.signature = sig;
-        saveSettings();
-        renderSettings();
-        toast('Unterschrift übernommen');
-      };
-      if (settings.signature) confirmDialog('Unterschrift ersetzen?', 'Die bisherige Unterschrift auf diesem Gerät wird ersetzt.', 'Ersetzen', apply);
-      else apply();
-    },
-    () => toast('Einsetzen wurde nicht erlaubt')
-  );
-}
+/** Gültige Unterschrift? { ratio, strokes: [[[x, y], …], …] } */
+const isSignature = (sig) =>
+  !!sig && typeof sig.ratio === 'number' && Array.isArray(sig.strokes) && sig.strokes.length > 0 &&
+  sig.strokes.every((st) => Array.isArray(st) && st.every((p) => Array.isArray(p) && p.length === 2 && p.every(Number.isFinite)));
 
 function signaturePad() {
   const modal = openModal(
@@ -1704,19 +1672,12 @@ function renderSettings() {
     <h2 class="section-title">Überstunden</h2>
     <div class="card form">
       <label class="field toggle-field"><span>Überstunden berechnen</span><input type="checkbox" class="toggle" data-s="overtime" ${settings.overtime ? 'checked' : ''}></label>
-      <label class="field ${settings.overtime ? '' : 'disabled'}" id="target-field"><span>Überstunden ab (h pro Woche)</span><input data-s="target" type="text" inputmode="decimal" value="${String(settings.target).replace('.', ',')}" ${settings.overtime ? '' : 'disabled'} enterkeyhint="done"></label>
       <label class="field toggle-field ${settings.overtime ? '' : 'disabled'}" id="prorate-field"><span>Überstunden bei Teilwochen anteilig</span><input type="checkbox" class="toggle" data-s="prorateTarget" ${settings.prorateTarget ? 'checked' : ''} ${settings.overtime ? '' : 'disabled'}></label>
     </div>
-    <p class="footnote">Alles über dieser Stundenzahl sind Überstunden. „Anteilig“: Bei einer halben Woche am Monatsende zählt nur der Anteil, z. B. 24 h für 3 Tage.</p>
+    <p class="footnote">Alles über 40 Stunden pro Woche sind Überstunden. „Anteilig“: Bei einer halben Woche am Monatsende zählt nur der Anteil, z. B. 24 h für 3 Tage.</p>
 
     <h2 class="section-title">Krankheit, Urlaub, Feiertage</h2>
     <div class="card form">
-      <label class="field"><span>Bundesland</span>
-        <select data-s="state">${Object.entries(STATES)
-          .map(([code, name]) => `<option value="${code}" ${settings.state === code ? 'selected' : ''}>${name}</option>`)
-          .join('')}</select></label>
-      <label class="field"><span>Urlaubsanspruch (Tage pro Jahr)</span><input data-s="vacationDays" type="text" inputmode="decimal" placeholder="z. B. 30" value="${settings.vacationDays ? String(settings.vacationDays).replace('.', ',') : ''}" enterkeyhint="done"></label>
-      <label class="field"><span>Stunden pro Tag</span><input data-s="hoursPerDay" type="text" inputmode="decimal" value="${String(settings.hoursPerDay).replace('.', ',')}" enterkeyhint="done"></label>
       ${Object.entries(DAY_STATUS)
         .map(
           ([key, label]) =>
@@ -1724,7 +1685,7 @@ function renderSettings() {
         )
         .join('')}
     </div>
-    <p class="footnote">Eingeschaltet: Der Tag zählt mit den „Stunden pro Tag“. Ausgeschaltet: 0 Stunden.</p>
+    <p class="footnote">Eingeschaltet: Der Tag zählt 8 Stunden. Ausgeschaltet: 0 Stunden. Feiertage gelten für Niedersachsen.</p>
 
     ${hiddenSuggestionsHTML()}
 
@@ -1735,15 +1696,11 @@ function renderSettings() {
         settings.signature
           ? `<div class="field sig-field"><span>Unterschrift</span>${signatureSVG(settings.signature)}</div>
       <button class="list-btn" data-act="sign">Neu unterschreiben …</button>
-      <button class="list-btn" data-act="sign-copy">Unterschrift kopieren</button>
-      <button class="list-btn" data-act="sign-paste">Unterschrift einsetzen</button>
       <button class="list-btn destructive" data-act="sign-clear">Unterschrift löschen</button>`
-          : `<button class="list-btn" data-act="sign">Unterschrift hinzufügen …</button>
-      <button class="list-btn" data-act="sign-paste">Unterschrift einsetzen</button>`
+          : `<button class="list-btn" data-act="sign">Unterschrift hinzufügen …</button>`
       }
     </div>
     <p class="footnote">Ort und Unterschrift stehen unten auf der Reisekostenabrechnung. Ohne Unterschrift bleibt das Feld leer.</p>
-    <p class="footnote">Vom iPad aufs iPhone: Auf dem iPad „Unterschrift kopieren“, dann auf dem iPhone „Unterschrift einsetzen“ (gleiche Apple-ID).</p>
 
     <h2 class="section-title">Datensicherung</h2>
     <div class="card list">
@@ -1810,6 +1767,13 @@ function mergeBackup(data) {
   }
   sheets = [...byId.values()];
   saveSheets();
+  // Unterschrift aus der Sicherung nur, wenn auf diesem Gerät noch keine gesetzt ist
+  let signature = false;
+  if (!settings.signature && data.settings && isSignature(data.settings.signature)) {
+    settings.signature = data.settings.signature;
+    saveSettings();
+    signature = true;
+  }
   // Reisekostenabrechnungen: gleiche ID → die zuletzt geänderte Fassung gewinnt
   if (Array.isArray(data.trips)) {
     const tripById = new Map(trips.map((t) => [t.id, t]));
@@ -1821,7 +1785,7 @@ function mergeBackup(data) {
     trips = [...tripById.values()];
     saveTrips();
   }
-  return { added, updated, skipped };
+  return { added, updated, skipped, signature };
 }
 
 /** Eine oder mehrere Dateien einlesen: Sicherung (.json), Stundenzettel als Numbers-Datei oder PDF */
@@ -1843,6 +1807,7 @@ async function importBackup(input) {
         const parts = [`${r.added} Stundenzettel neu`];
         if (r.updated) parts.push(`${r.updated} aktualisiert`);
         if (r.skipped) parts.push(`${r.skipped} übersprungen`);
+        if (r.signature) parts.push('Unterschrift übernommen');
         lines.push(`${label}: ${parts.join(', ')}`);
         continue;
       }
@@ -2389,12 +2354,6 @@ document.addEventListener('click', (e) => {
     case 'sign':
       signaturePad();
       break;
-    case 'sign-copy':
-      copySignature();
-      break;
-    case 'sign-paste':
-      pasteSignature();
-      break;
     case 'sign-clear':
       confirmDialog('Unterschrift löschen?', 'Neue Abrechnungen haben dann keine Unterschrift.', 'Löschen', () => {
         settings.signature = null;
@@ -2480,17 +2439,11 @@ document.addEventListener('input', (e) => {
     const key = t.dataset.s;
     if (key === 'overtime') {
       settings.overtime = t.checked;
-      ['target-field', 'prorate-field'].forEach((fid) => {
+      ['prorate-field'].forEach((fid) => {
         const field = document.getElementById(fid);
         field.classList.toggle('disabled', !t.checked);
         field.querySelector('input').disabled = !t.checked;
       });
-    } else if (key === 'target' || key === 'hoursPerDay') {
-      const v = parseFloat(t.value.replace(',', '.'));
-      if (!Number.isNaN(v) && v >= 0) settings[key] = v;
-    } else if (key === 'vacationDays') {
-      const v = parseFloat(t.value.replace(',', '.'));
-      settings.vacationDays = Number.isNaN(v) || v < 0 ? 0 : v;
     } else if (key === 'minuteStep') {
       settings.minuteStep = Number(t.value);
     } else if (key === 'prorateTarget') {
