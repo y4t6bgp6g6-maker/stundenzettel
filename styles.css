@@ -218,19 +218,19 @@ input { font: inherit; color: inherit; }
 }
 .wd-0 { --wd: #007aff; }
 .wd-1 { --wd: #ff9500; }
-.wd-2 { --wd: #30b0c7; }
-.wd-3 { --wd: #ffcc00; }
-.wd-4 { --wd: #ff2d55; }
-.wd-5 { --wd: #5856d6; }
-.wd-6 { --wd: #a2845e; }
+.wd-2 { --wd: #00c7be; }
+.wd-3 { --wd: #e8388f; }
+.wd-4 { --wd: #7cc242; }
+.wd-5 { --wd: #7d5cff; }
+.wd-6 { --wd: #8d6e4c; }
 @media (prefers-color-scheme: dark) {
   .wd-0 { --wd: #0a84ff; }
   .wd-1 { --wd: #ff9f0a; }
-  .wd-2 { --wd: #40c8e0; }
-  .wd-3 { --wd: #ffd60a; }
-  .wd-4 { --wd: #ff375f; }
-  .wd-5 { --wd: #5e5ce6; }
-  .wd-6 { --wd: #ac8e68; }
+  .wd-2 { --wd: #40e0d0; }
+  .wd-3 { --wd: #ff4fa3; }
+  .wd-4 { --wd: #9ad04a; }
+  .wd-5 { --wd: #9b7bff; }
+  .wd-6 { --wd: #b08e68; }
 }
 .day-head {
   display: flex;
