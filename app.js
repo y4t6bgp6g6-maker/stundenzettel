@@ -2196,12 +2196,31 @@ function placeSuggestBar(keepVisible = true) {
     if (r.bottom > top - 8) window.scrollBy(0, r.bottom - top + 16);
   }
 }
-/** Bei offener Tastatur verschiebt iOS den sichtbaren Ausschnitt; die feste Kopfzeile (z. B. die Suche) bleibt oben im Bild */
+/** Tastatur offen: der sichtbare Ausschnitt ist deutlich kleiner als das Fenster */
+const keyboardOpen = () => !!window.visualViewport && window.innerHeight - visualViewport.height > 120;
+/** Bei offener Tastatur verschiebt iOS den sichtbaren Ausschnitt; die feste Kopfzeile (z. B. die Suche) bleibt oben im Bild.
+ *  Nur dann – beim Nachfedern am Seitenende verschiebt iOS den Ausschnitt ebenfalls, da soll die Kopfzeile stehen bleiben. */
 function placeNav() {
   const nav = document.querySelector('.nav');
-  const y = window.visualViewport ? Math.max(0, visualViewport.offsetTop) : 0;
+  const y = keyboardOpen() ? Math.max(0, visualViewport.offsetTop) : 0;
   if (nav) nav.style.transform = y ? `translate3d(0, ${y}px, 0)` : '';
 }
+/** Wie in iOS-Apps: Ziehen am Inhalt schließt die Tastatur (mit Tastatur würden die festen Leisten beim Scrollen zittern) */
+let scrollTouchY = null;
+document.addEventListener('touchstart', (e) => (scrollTouchY = e.touches.length === 1 ? e.touches[0].clientY : null), { passive: true });
+document.addEventListener(
+  'touchmove',
+  (e) => {
+    const el = document.activeElement;
+    if (scrollTouchY == null || drag || !el || !el.matches('input, textarea') || !keyboardOpen()) return;
+    if (e.target === el || e.target.closest('#suggest-bar')) return;
+    if (Math.abs(e.touches[0].clientY - scrollTouchY) > 12) {
+      scrollTouchY = null;
+      el.blur();
+    }
+  },
+  { passive: true }
+);
 if (window.visualViewport) {
   // Beim Scrollen nur mitziehen, sofort und ohne die Seite zu verschieben (sonst zittert die Leiste)
   visualViewport.addEventListener('resize', () => {
