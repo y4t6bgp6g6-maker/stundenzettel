@@ -372,8 +372,8 @@ input { font: inherit; color: inherit; }
   font-variant-numeric: tabular-nums;
 }
 .sum-row + .sum-row { border-top: 0.5px solid var(--sep); }
-/* Stunden Gesamt und Überstunden im Zettel: feste Glas-Kapseln unten */
-.sum-bar { gap: 10px; }
+/* Stunden Gesamt und Überstunden im Zettel: Glas-Kapseln am Seitenende */
+.sum-bar { display: flex; justify-content: center; gap: 10px; margin-top: 16px; }
 .sum-pill {
   flex: 1;
   max-width: 299px;

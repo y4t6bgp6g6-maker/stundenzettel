@@ -741,7 +741,7 @@ function renderEditor(id) {
       <div class="daybar" id="daybar">${dayBarHTML(s)}</div>
     </header>
     <div id="days">${daysHTML(s)}</div>
-    <div class="bottom-bar sum-bar" id="summary">${summaryHTML(s)}</div>`;
+    <div class="sum-bar" id="summary">${summaryHTML(s)}</div>`;
 }
 
 /** Kurze Stundenangabe für die Tagesleiste: „9,5“ bzw. „9:30“ */
