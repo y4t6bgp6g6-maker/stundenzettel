@@ -791,7 +791,7 @@ function dayHTML(s, i) {
     // Kompakte Zeile: Wochentag links, rechts farbiges Etikett (zugleich Auswahl der Tagesart)
     const credit = dayTotal(day);
     const holiday = day.status === 'feiertag' ? holidayName(date) : '';
-    return `<section class="day status-day status-${day.status}" data-day="${i}">
+    return `<section class="day status-day status-${day.status} wd-${i}" data-day="${i}">
       <div class="day-head status-head">
         <div class="status-when"><b>${WEEKDAYS[i]}</b> <span class="muted">${fmtDayMonth(date)}${holiday ? ` · ${escapeHtml(holiday)}` : ''}</span></div>
         <button class="chip-btn status-btn set status-tag" data-act="status">${ICON[day.status]} ${DAY_STATUS_SHORT[day.status]} · ${fmtH(credit)} ▾</button>
