@@ -204,6 +204,37 @@ input { font: inherit; color: inherit; }
 
 /* Tage */
 .day { background: var(--card); border-radius: 12px; margin-top: 16px; overflow: visible; }
+/* Feste Farbe je Wochentag: Dreieck in der Ecke oben links */
+.day[class*="wd-"] { position: relative; }
+.day[class*="wd-"]::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  border-top: 20px solid var(--wd);
+  border-right: 20px solid transparent;
+  border-top-left-radius: 12px;
+  pointer-events: none;
+  z-index: 1;
+}
+.wd-0 { --wd: #007aff; }
+.wd-1 { --wd: #ff9500; }
+.wd-2 { --wd: #30b0c7; }
+.wd-3 { --wd: #ffcc00; }
+.wd-4 { --wd: #ff2d55; }
+.wd-5 { --wd: #5856d6; }
+.wd-6 { --wd: #a2845e; }
+@media (prefers-color-scheme: dark) {
+  .wd-0 { --wd: #0a84ff; }
+  .wd-1 { --wd: #ff9f0a; }
+  .wd-2 { --wd: #40c8e0; }
+  .wd-3 { --wd: #ffd60a; }
+  .wd-4 { --wd: #ff375f; }
+  .wd-5 { --wd: #5e5ce6; }
+  .wd-6 { --wd: #ac8e68; }
+}
 .day-head {
   display: flex;
   align-items: center;

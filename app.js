@@ -778,14 +778,14 @@ function dayHTML(s, i) {
       </div>
     </div>`;
   if (dayCollapsed(s, i)) {
-    return `<section class="day collapsed" data-day="${i}">
+    return `<section class="day collapsed wd-${i}" data-day="${i}">
       ${head}
       <button class="link-btn expand-btn" data-act="expand">${ICON.plus} Arbeit eintragen</button>
     </section>`;
   }
   if (day.status) {
     const credit = dayTotal(day);
-    return `<section class="day status-day status-${day.status}" data-day="${i}">
+    return `<section class="day status-day status-${day.status} wd-${i}" data-day="${i}">
       ${head}
       <div class="status-body">
         <b>${DAY_STATUS[day.status]}</b>
@@ -795,7 +795,7 @@ function dayHTML(s, i) {
       <div class="day-foot"><span class="day-total">Gesamt <b>${fmtH(credit)}</b></span></div>
     </section>`;
   }
-  return `<section class="day" data-day="${i}">
+  return `<section class="day wd-${i}" data-day="${i}">
     ${head}
     ${day.rows.map((r) => rowHTML(day, r)).join('')}
     <div class="day-foot">
@@ -1369,7 +1369,7 @@ function tripDayHTML(r) {
   const wd = WEEKDAYS[(r.date.getDay() + 6) % 7];
   const timeBtn = (which, label) =>
     `<button class="time ${r[which] == null ? 'empty' : ''}" data-act="trip-time" data-which="${which}">${r[which] == null ? label : fmtClock(r[which])}</button>`;
-  return `<section class="day trip-day" data-date="${r.iso}">
+  return `<section class="day trip-day wd-${(r.date.getDay() + 6) % 7}" data-date="${r.iso}">
     <div class="day-head"><div><b>${wd}</b> <span class="muted">${fmtDayMonth(r.date)}</span></div><span class="muted trip-std">${r.minutes == null ? '' : fmtStd(r.minutes)}</span></div>
     <div class="row">
       <div class="row-times">
