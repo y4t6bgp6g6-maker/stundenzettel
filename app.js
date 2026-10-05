@@ -2196,22 +2196,29 @@ function placeSuggestBar(keepVisible = true) {
     if (r.bottom > top - 8) window.scrollBy(0, r.bottom - top + 16);
   }
 }
+/** Eingabefeld, in dem gerade getippt wird */
+const typingField = () => {
+  const el = document.activeElement;
+  return el && el.matches('input, textarea') ? el : null;
+};
 /** Tastatur offen: der sichtbare Ausschnitt ist deutlich kleiner als das Fenster */
 const keyboardOpen = () => !!window.visualViewport && window.innerHeight - visualViewport.height > 120;
 /** Bei offener Tastatur verschiebt iOS den sichtbaren Ausschnitt; die feste Kopfzeile (z. B. die Suche) bleibt oben im Bild.
  *  Nur dann – beim Nachfedern am Seitenende verschiebt iOS den Ausschnitt ebenfalls, da soll die Kopfzeile stehen bleiben. */
 function placeNav() {
   const nav = document.querySelector('.nav');
-  const y = keyboardOpen() ? Math.max(0, visualViewport.offsetTop) : 0;
+  const y = typingField() && keyboardOpen() ? Math.max(0, visualViewport.offsetTop) : 0;
   if (nav) nav.style.transform = y ? `translate3d(0, ${y}px, 0)` : '';
 }
+// Nach dem Schließen der Tastatur kommen die letzten Meldungen von iOS teils noch während der Animation:
+// Position mehrmals nachprüfen, damit die Kopfzeile nicht verschoben stehen bleibt
+document.addEventListener('focusout', () => {
+  requestAnimationFrame(placeNav);
+  for (const ms of [150, 350, 700, 1200]) setTimeout(placeNav, ms);
+});
 /** Wie in iOS-Apps: Ziehen am Inhalt schließt die Tastatur (mit Tastatur würden die festen Leisten beim Scrollen zittern).
  *  Langsames Ziehen meldet iOS teils kaum über touchmove – daher zählt auch jedes Scrollen, solange der Finger aufliegt. */
 let scrollTouch = null; // { y, target }
-const typingField = () => {
-  const el = document.activeElement;
-  return el && el.matches('input, textarea') ? el : null;
-};
 function dismissKeyboardOnScroll() {
   const el = typingField();
   if (!scrollTouch || drag || !el) return;
