@@ -588,6 +588,7 @@ input { font: inherit; color: inherit; }
 .status-btn.set { background: var(--status); }
 /* Tage mit Tagesart: kompakte Zeile mit getöntem Etikett */
 .status-head { border-bottom: 0; padding: 10px 12px 10px 14px; gap: 10px; }
+.status-day.has-work .status-head { border-bottom: 0.5px solid var(--sep); }
 .status-when { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status-btn.set.status-tag {
   display: inline-flex;

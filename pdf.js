@@ -169,8 +169,10 @@ function buildTimesheetPdf(sheet, overtimeTarget) {
   const headerH = 26;
   const footerH = overtimeTarget == null ? 28 : 46;
   const bottom = PDF_H - 36 - footerH;
-  // Mo–Fr mindestens 5 Zeilen, Sa/So mindestens 1; Krankheit/Urlaub usw. nur die Mindestzeilen
-  const rowsOnPdf = (d, i) => (d.status ? pdfMinRows(i) : Math.max(d.rows.length, pdfMinRows(i)));
+  // Mo–Fr mindestens 5 Zeilen, Sa/So mindestens 1; Krankheit/Urlaub usw. nur die Mindestzeilen;
+  // Feiertag mit Arbeit (Notdienst): eine Zeile „Feiertag“, darunter die Arbeitszeilen
+  const rowsOnPdf = (d, i) =>
+    holidayWork(d) ? Math.max(d.rows.length + 1, pdfMinRows(i)) : d.status ? pdfMinRows(i) : Math.max(d.rows.length, pdfMinRows(i));
   const rowCount = sheet.days.reduce((n, d, i) => n + rowsOnPdf(d, i), 0);
   const rowH = Math.min(28, (bottom - tableTop - headerH) / Math.max(rowCount, 1));
   const fs = Math.max(5, Math.min(9.5, rowH * 0.48));
@@ -200,6 +202,7 @@ function buildTimesheetPdf(sheet, overtimeTarget) {
     const h = n * rowH;
     const active = sheetIsActive(sheet, i);
     const status = active ? day.status : null;
+    const hw = active && holidayWork(day);
     dayTops.push(y);
 
     doc.fill(xs[0], y, xs[1] - xs[0], h, 0.87);
@@ -208,19 +211,23 @@ function buildTimesheetPdf(sheet, overtimeTarget) {
     for (let r = 1; r < n; r++) {
       const ly = y + r * rowH;
       for (const { c } of textCols) {
-        if (status && c === 5) continue; // Spalte „Baustelle“ bleibt für den Text frei
+        if (status && !hw && c === 5) continue; // Spalte „Baustelle“ bleibt für den Text frei
         doc.line(xs[c], ly, xs[c + 1], ly, 0.4, 0.78);
       }
     }
 
     doc.textBox(WEEKDAYS[i], xs[0] + 3, y, xs[1] - xs[0] - 6, rowH, fs, true, 'left', active ? BLACK : GREY_TEXT);
 
-    if (status) {
+    if (status && !hw) {
       doc.labelBox(DAY_STATUS_SHORT[status], xs[5] + 4, y, xs[6] - xs[5] - 8, h, Math.min(14, Math.max(fs + 3, h * 0.3)));
       doc.textBox(fmtHours(dayTotal(day)), xs[7] + 3, y, xs[8] - xs[7] - 6, rowH, fs, false, 'right');
     } else if (active) {
+      if (hw) {
+        doc.textBox(fmtHours(statusCredit(status)), xs[3] + 3, y, xs[4] - xs[3] - 6, rowH, fs, false, 'right');
+        doc.textBox(DAY_STATUS_SHORT[status], xs[5] + 3, y, xs[6] - xs[5] - 6, rowH, fs, true);
+      }
       day.rows.forEach((row, r) => {
-        const ry = y + r * rowH;
+        const ry = y + (hw ? r + 1 : r) * rowH;
         const cell = (c, text, align) => doc.textBox(text, xs[c] + 3, ry, xs[c + 1] - xs[c] - 6, rowH, fs, false, align);
         if (row.start != null) cell(1, fmtTime(row.start), 'right');
         if (row.end != null) cell(2, fmtTime(row.end), 'right');
@@ -230,7 +237,10 @@ function buildTimesheetPdf(sheet, overtimeTarget) {
         doc.wrapBox(row.work, xs[6] + 3, ry, xs[7] - xs[6] - 6, rowH, fs);
       });
       const first = (c, text) => doc.textBox(text, xs[c] + 3, y, xs[c + 1] - xs[c] - 6, rowH, fs, false, 'right');
-      if (day.pause != null && (day.pause > 0 || dayHasTimes(day))) first(4, fmtHours(day.pause));
+      if (day.pause != null && (day.pause > 0 || dayHasTimes(day))) {
+        // Pause gehört zur Arbeit: am Feiertag in die erste Arbeitszeile
+        doc.textBox(fmtHours(day.pause), xs[4] + 3, hw ? y + rowH : y, xs[5] - xs[4] - 6, rowH, fs, false, 'right');
+      }
       first(7, fmtHours(dayTotal(day)));
     }
     y += h;

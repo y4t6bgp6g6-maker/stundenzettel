@@ -98,7 +98,8 @@ function finishDay(day) {
     const status = hasTimes ? statusOnlyText(t) : statusOnlyText(t) || statusFromText(t);
     if (status) {
       day.status = status;
-      day.rows = [];
+      // Feiertag mit Uhrzeiten (z. B. Notdienst): die Arbeitszeilen bleiben erhalten
+      day.rows = status === 'feiertag' && hasTimes ? day.rows.filter((r) => r.start != null || r.end != null) : [];
       return;
     }
   }
@@ -857,12 +858,17 @@ function parsedToSheet(parsed, fileName) {
     if (seen.has(d.day)) continue; // doppelte Wochentage: nur der erste zählt
     seen.add(d.day);
     const day = s.days[d.day];
+    const rows = d.rows.map((r) => ({ id: uid(), start: r.start, end: r.end, site: r.site || '', work: r.work || '' }));
     if (d.status) {
       day.status = d.status;
       day.pause = null;
+      // Feiertag mit Arbeit (Notdienst): Zeilen übernehmen
+      if (d.status === 'feiertag' && rows.length) {
+        day.rows = rows;
+        day.pause = d.pause != null ? d.pause : null;
+      }
       continue;
     }
-    const rows = d.rows.map((r) => ({ id: uid(), start: r.start, end: r.end, site: r.site || '', work: r.work || '' }));
     if (rows.length) {
       day.rows = rows;
       day.pause = d.pause != null ? d.pause : null;

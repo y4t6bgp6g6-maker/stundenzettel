@@ -64,15 +64,19 @@ const emptyRow = () => ({ id: uid(), start: null, end: null, site: '', work: '' 
 const rowIsEmpty = (r) => r.start == null && r.end == null && !r.site && !r.work;
 const rowMinutes = (r) => (r.start == null || r.end == null ? null : r.end >= r.start ? r.end - r.start : r.end + 1440 - r.start);
 const dayWorked = (d) => d.rows.reduce((s, r) => s + (rowMinutes(r) || 0), 0);
-/** Gutgeschriebene Minuten für Krankheit, Urlaub usw. laut Einstellungen */
 /** Krank, Urlaub und Feiertag zählen 8 Stunden, Frei zählt 0 */
 const statusCredit = (status) => (status === 'frei' ? 0 : Math.round(settings.hoursPerDay * 60));
-const dayTotal = (d) => (d.status ? statusCredit(d.status) : Math.max(0, dayWorked(d) - (d.pause || 0)));
+/** An einem Feiertag kann trotzdem gearbeitet werden (z. B. Notdienst): die Stunden kommen zu den 8 gutgeschriebenen dazu */
+const canWork = (d) => !d.status || d.status === 'feiertag';
+const workedNet = (d) => Math.max(0, dayWorked(d) - (d.pause || 0));
+const dayTotal = (d) => (d.status ? statusCredit(d.status) + (canWork(d) ? workedNet(d) : 0) : workedNet(d));
 const dayHasTimes = (d) => d.rows.some((r) => r.start != null || r.end != null);
 /** Am Tag wurde schon etwas eingetragen, aber noch keine Pause (nur neue Zettel haben pause: null) */
 const pauseMissing = (d) => !d.status && d.pause == null && d.rows.some((r) => !rowIsEmpty(r));
 /** Am Tag wurde schon etwas eingetragen (Zeit, Baustelle, Art der Arbeit oder eine Pause) */
-const dayStarted = (d) => !d.status && (d.pause > 0 || d.rows.some((r) => !rowIsEmpty(r)));
+const dayStarted = (d) => canWork(d) && (d.pause > 0 || d.rows.some((r) => !rowIsEmpty(r)));
+/** Feiertag, an dem zusätzlich gearbeitet wurde */
+const holidayWork = (d) => d.status === 'feiertag' && dayStarted(d);
 /** Zeilen, die zeitlich nicht zueinander passen: Beginn vor dem Beginn einer Zeile darüber – beide werden markiert */
 function rowsOutOfOrder(d) {
   const bad = new Set();
@@ -100,7 +104,7 @@ const fieldMissing = (d, r, field) =>
   dayStarted(d) && (field === 'start' || field === 'end' ? r[field] == null : !String(r[field] || '').trim());
 /** Tag hat irgendwo ein Warnzeichen (fehlende Angabe, Pause, Reihenfolge, Ende vor Beginn) */
 const dayHasWarning = (d) =>
-  !d.status &&
+  canWork(d) &&
   (pauseMissing(d) || d.rows.some((r) => timeWarning(d, r) || fieldMissing(d, r, 'site') || fieldMissing(d, r, 'work')));
 const sheetHasWarning = (s) => sheetActiveDays(s).some((i) => dayHasWarning(s.days[i]));
 const timeWarning = (d, r) =>
@@ -242,7 +246,7 @@ function markHolidays(s) {
 function sheetProblems(s) {
   const problems = [];
   s.days.forEach((d, i) => {
-    if (!sheetIsActive(s, i) || d.status) return;
+    if (!sheetIsActive(s, i) || !canWork(d)) return;
     const day = WEEKDAYS[i];
     const timed = [];
     d.rows.forEach((r, k) => {
@@ -272,7 +276,7 @@ function sheetProblems(s) {
       }
     }
     if (pauseMissing(d)) problems.push(`${day}: Pause fehlt`);
-    if (i < 5 && !dayStarted(d)) problems.push(`${day}: kein Eintrag`);
+    if (i < 5 && !d.status && !dayStarted(d)) problems.push(`${day}: kein Eintrag`);
   });
   return problems;
 }
@@ -547,9 +551,13 @@ function searchSheet(s, query) {
       if (status) {
         if ([DAY_STATUS_SHORT[status], DAY_STATUS[status]].some((v) => searchKey(v).includes(query.text))) {
           found.add(DAY_STATUS_SHORT[status]);
-          dayNames.push(WEEKDAYS_SHORT[i]);
+          dayHit = true;
         }
-        continue;
+        // Am Feiertag zählen zusätzlich die Zeilen (Notdienst)
+        if (!canWork(s.days[i])) {
+          if (dayHit) dayNames.push(WEEKDAYS_SHORT[i]);
+          continue;
+        }
       }
       for (const r of s.days[i].rows) {
         for (const v of [r.site, r.work]) {
@@ -758,7 +766,7 @@ function dayBarHTML(s) {
       const cls = ['db-day', sameDay(sheetDate(s, i), today) ? 'today' : '', d.status ? `status-${d.status} has-status` : ''].join(' ');
       return `<button class="${cls}" data-act="jump" data-day="${i}">
         <span class="db-name">${WEEKDAYS_SHORT[i]}${dayHasWarning(d) ? '<span class="db-warn">⚠️</span>' : ''}</span>
-        <span class="db-h">${d.status ? DAY_STATUS_SHORT[d.status].slice(0, 2) + '.' : total ? fmtTiny(total) : '–'}</span>
+        <span class="db-h">${d.status && !holidayWork(d) ? DAY_STATUS_SHORT[d.status].slice(0, 2) + '.' : total ? fmtTiny(total) : '–'}</span>
       </button>`;
     })
     .join('')}`;
@@ -803,25 +811,34 @@ function dayHTML(s, i) {
       <button class="link-btn expand-btn" data-act="expand">${ICON.plus} Arbeit eintragen</button>
     </section>`;
   }
-  if (day.status) {
-    // Kompakte Zeile: Wochentag links, rechts farbiges Etikett (zugleich Auswahl der Tagesart)
-    const credit = dayTotal(day);
-    const holiday = day.status === 'feiertag' ? holidayName(date) : '';
-    return `<section class="day status-day status-${day.status} wd-${i}" data-day="${i}">
-      <div class="day-head status-head">
-        <div class="status-when"><b>${WEEKDAYS[i]}</b> <span class="muted">${fmtDayMonth(date)}${holiday ? ` · ${escapeHtml(holiday)}` : ''}</span></div>
-        <button class="chip-btn status-btn set status-tag" data-act="status">${ICON[day.status]} ${DAY_STATUS_SHORT[day.status]} · ${fmtH(credit)} ▾</button>
-      </div>
-    </section>`;
-  }
-  return `<section class="day wd-${i}" data-day="${i}">
-    ${head}
-    ${day.rows.map((r) => rowHTML(day, r)).join('')}
+  const rowsAndFoot = () => `${day.rows.map((r) => rowHTML(day, r)).join('')}
     <div class="day-foot">
       <button class="link-btn" data-act="addrow">${ICON.plus} Zeile</button>
       <button class="pill ${day.pause == null ? 'empty' : ''}" data-act="pause">Pause${day.pause == null ? '' : ` ${fmtH(day.pause)}`}${pauseMissing(day) ? ' ⚠️' : ''}</button>
       <span class="day-total">Gesamt <b>${fmtH(dayTotal(day))}</b></span>
-    </div>
+    </div>`;
+  if (day.status) {
+    // Kompakte Zeile: Wochentag links, rechts farbiges Etikett (zugleich Auswahl der Tagesart)
+    const holiday = day.status === 'feiertag' ? holidayName(date) : '';
+    // Feiertag: darunter Arbeit eintragen (z. B. Notdienst), zählt zusätzlich zu den 8 Stunden
+    const working = day.status === 'feiertag' && (holidayWork(day) || expandedDays.has(`${s.id}:${i}`));
+    const extra =
+      day.status !== 'feiertag'
+        ? ''
+        : working
+          ? rowsAndFoot()
+          : `<button class="link-btn expand-btn" data-act="expand">${ICON.plus} Arbeit eintragen (z. B. Notdienst)</button>`;
+    return `<section class="day status-day status-${day.status} wd-${i}${working ? ' has-work' : ''}" data-day="${i}">
+      <div class="day-head status-head">
+        <div class="status-when"><b>${WEEKDAYS[i]}</b> <span class="muted">${fmtDayMonth(date)}${holiday ? ` · ${escapeHtml(holiday)}` : ''}</span></div>
+        <button class="chip-btn status-btn set status-tag" data-act="status">${ICON[day.status]} ${DAY_STATUS_SHORT[day.status]} · ${fmtH(statusCredit(day.status))} ▾</button>
+      </div>
+      ${extra}
+    </section>`;
+  }
+  return `<section class="day wd-${i}" data-day="${i}">
+    ${head}
+    ${rowsAndFoot()}
   </section>`;
 }
 
@@ -1112,7 +1129,7 @@ const uniqueTexts = (list) => {
 
 /** Reiseanlass aus dem Stundenzettel: Reiseorte (Baustellen) und Tätigkeiten (Art der Arbeit) */
 function tripTextFor(day) {
-  if (!day || day.status) return { places: '', works: '' };
+  if (!day || !canWork(day)) return { places: '', works: '' };
   const sites = uniqueTexts(day.rows.map((r) => (r.site || '').trim()));
   const works = uniqueTexts(day.rows.flatMap((r) => (r.work || '').split(',').map((w) => w.trim())));
   return { places: joinSites(sites), works: works.join(', ') };
@@ -1124,7 +1141,7 @@ function tripAuto(trip, iso) {
   const prev = trip.dates.includes(isoDate(addDays(date, -1)));
   const next = trip.dates.includes(isoDate(addDays(date, 1)));
   const day = sheetDayFor(date);
-  const rows = day && !day.status ? day.rows : [];
+  const rows = day && canWork(day) ? day.rows : [];
   const starts = rows.map((r) => r.start).filter((v) => v != null);
   const ends = rows.map((r) => r.end).filter((v) => v != null);
   return {
@@ -1276,7 +1293,7 @@ function tripRowHTML(t) {
     uniqueTexts(
       rows.flatMap((r) => {
         const day = sheetDayFor(r.date);
-        return day && !day.status ? day.rows.map((x) => (x.site || '').trim()) : [];
+        return day && canWork(day) ? day.rows.map((x) => (x.site || '').trim()) : [];
       })
     )
   );
