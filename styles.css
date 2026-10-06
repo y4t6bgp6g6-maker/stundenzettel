@@ -917,6 +917,7 @@ button.nav-title { font-size: 17px; }
 .trip-text:focus { border-bottom-color: var(--accent); }
 .trip-text::placeholder { color: var(--muted); opacity: 0.7; }
 .trip-ditto { font-size: 13px; margin: 6px 0 0; }
+.trip-issue { font-size: 13px; margin: 6px 0 0; color: var(--warning); }
 .trip-meal { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
 .trip-meal input {
   width: 80px;

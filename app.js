@@ -1471,8 +1471,11 @@ function tripDayHTML(r) {
         ${timeBtn('start', 'Beginn')}
         <span class="arrow">–</span>
         ${timeBtn('end', 'Ende')}
-        ${r.start == null || r.end == null ? '<span class="time-warn show">⚠️</span>' : ''}
+        ${r.start == null || r.end == null || tripDayIssues(r).length ? '<span class="time-warn show">⚠️</span>' : ''}
       </div>
+      ${tripDayIssues(r)
+        .map((x) => `<p class="trip-issue">⚠️ ${escapeHtml(x)}</p>`)
+        .join('')}
       <div class="trip-field"><span class="field-icon">${ICON.pin}</span><textarea class="trip-text" data-t="places" rows="1" placeholder="Reiseorte (Baustellen)" autocapitalize="sentences">${escapeHtml(r.places)}</textarea></div>
       <div class="trip-field"><span class="field-icon">${ICON.tool}</span><textarea class="trip-text" data-t="works" rows="1" placeholder="Tätigkeiten" autocapitalize="sentences">${escapeHtml(r.works)}</textarea></div>
       <p class="trip-ditto muted" ${r.ditto ? '' : 'hidden'}>Gleicher Text wie darüber – im PDF steht „〃“.</p>
@@ -1574,6 +1577,28 @@ function tripMoreMenu() {
   ]);
 }
 
+/**
+ * Widersprüche eines Reisetags zum Stundenzettel: kein Zettel / kein Eintrag / Urlaub, Krank, Frei an dem Tag;
+ * Reise beginnt nach dem Arbeitsbeginn bzw. endet vor dem Arbeitsende (nur An- und Abreisetag, 0:00/24:00 zählt nicht).
+ */
+function tripDayIssues(r) {
+  const day = sheetDayFor(r.date);
+  if (!day) return ['Kein Stundenzettel für diesen Tag'];
+  if (!canWork(day)) return [`Im Stundenzettel als ${DAY_STATUS_SHORT[day.status]} eingetragen`];
+  const rows = day.rows.filter((x) => !rowIsEmpty(x));
+  if (!rows.length) return ['Im Stundenzettel kein Eintrag'];
+  const issues = [];
+  const starts = rows.map((x) => x.start).filter((v) => v != null);
+  const ends = rows.map((x) => x.end).filter((v) => v != null);
+  const workStart = starts.length ? Math.min(...starts) : null;
+  const workEnd = ends.length ? Math.max(...ends) : null;
+  if (r.start != null && r.start > 0 && workStart != null && r.start > workStart)
+    issues.push(`Reise beginnt ${fmtClock(r.start)}, Arbeit laut Zettel schon ${fmtTime(workStart)}`);
+  if (r.end != null && r.end < 1440 && workEnd != null && r.end < workEnd)
+    issues.push(`Reise endet ${fmtClock(r.end)}, Arbeit laut Zettel erst ${fmtTime(workEnd)}`);
+  return issues;
+}
+
 function tripProblems(t) {
   const problems = [];
   if (!(t.name || settings.name).trim()) problems.push('Name fehlt (in den Einstellungen)');
@@ -1581,8 +1606,11 @@ function tripProblems(t) {
     const day = `${WEEKDAYS_SHORT[(r.date.getDay() + 6) % 7]} ${fmtDayMonth(r.date)}`;
     const missing = [r.start == null && 'Beginn', r.end == null && 'Ende', !r.text.trim() && 'Reiseanlass'].filter(Boolean);
     if (missing.length) problems.push(`${day}: ${missing.join(', ')} ${missing.length > 1 ? 'fehlen' : 'fehlt'}`);
+    for (const issue of tripDayIssues(r)) problems.push(`${day}: ${issue}`);
   }
   if (!(t.place || '').trim()) problems.push('Ort fehlt');
+  if (!(settings.signature && settings.signature.strokes && settings.signature.strokes.length))
+    problems.push('Unterschrift fehlt (in den Einstellungen)');
   return problems;
 }
 
