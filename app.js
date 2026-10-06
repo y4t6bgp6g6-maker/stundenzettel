@@ -23,10 +23,10 @@ const fmtShort = (d) => `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${String(d
 const fmtDayMonth = (d) => `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.`;
 /** Minuten als Dezimalstunden: 90 → 1,50 */
 const fmtDec = (minutes) => (minutes / 60).toFixed(2).replace('.', ',');
-/** Stunden im PDF: immer dezimal, ohne Einheit („8,50“) */
+/** Stunden im PDF: dezimal, ohne Einheit („8,50“) */
 const fmtHours = fmtDec;
-/** Stunden in der App: immer Stunden und Minuten („8h 30m“), volle Stunden ohne Minuten („8h“) */
-const fmtH = (minutes) => `${Math.floor(minutes / 60)}h${minutes % 60 ? ` ${minutes % 60}m` : ''}`;
+/** Stunden in der App: dezimal mit Einheit („8,50 h“) */
+const fmtH = (minutes) => `${fmtDec(minutes)} h`;
 /** Minuten seit Mitternacht: 480 → 08:00 */
 const fmtTime = (m) => `${pad(Math.floor(m / 60) % 24)}:${pad(m % 60)}`;
 
@@ -178,7 +178,7 @@ settings.target = 40;
 settings.hoursPerDay = 8;
 settings.state = 'NI';
 delete settings.vacationDays;
-// Ebenfalls fest: Anzeige in der App „8h 30m“, im PDF dezimal; Überstunden immer, bei Teilwochen anteilig;
+// Ebenfalls fest: Stunden in App und PDF dezimal; Überstunden immer, bei Teilwochen anteilig;
 // Krank/Urlaub/Feiertag zählen 8 Stunden, Frei 0
 delete settings.hourFormat;
 delete settings.prorateTarget;
@@ -744,8 +744,8 @@ function renderEditor(id) {
     <div class="sum-bar" id="summary">${summaryHTML(s)}</div>`;
 }
 
-/** Kurze Stundenangabe für die Tagesleiste: „9:30“ */
-const fmtTiny = (min) => `${Math.floor(min / 60)}:${pad(min % 60)}`;
+/** Kurze Stundenangabe für die Tagesleiste: „9,5“ */
+const fmtTiny = (min) => String(Math.round((min / 60) * 100) / 100).replace('.', ',');
 
 /** Tagesleiste: Mo–So mit Stunden, heute markiert */
 function dayBarHTML(s) {
