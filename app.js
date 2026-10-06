@@ -2027,21 +2027,14 @@ function weekPicker(initial, excludeId, onPick, forTrip = false) {
   else for (const sh of sheets) if (sh.id !== excludeId) mark(parseDate(sh.weekStart), !!sh.sentAt);
   const what = forTrip ? 'Abrechnung' : 'Zettel';
 
-  function draw(slide) {
+  /** Ein Monat als Raster: Kopfzeile, KW-Spalte, Tage */
+  function gridHTML(m) {
     const preview = newSheet(selected, '');
     const weeks = [];
-    const next = new Date(month.getFullYear(), month.getMonth() + 1, 1);
-    for (let w = mondayOf(month); w < next; w = addDays(w, 7)) weeks.push(w);
-    const exists = existingSheet(selected, excludeId);
+    const next = new Date(m.getFullYear(), m.getMonth() + 1, 1);
+    for (let w = mondayOf(m); w < next; w = addDays(w, 7)) weeks.push(w);
     const today = new Date();
-
-    wp.innerHTML = `
-      <div class="wp-nav">
-        <button class="icon-btn" data-wp="prev" aria-label="Voriger Monat">${ICON.chevronLeft}</button>
-        <b>${MONTHS[month.getMonth()]} ${month.getFullYear()}</b>
-        <button class="icon-btn" data-wp="next" aria-label="Nächster Monat">${ICON.chevronRight}</button>
-      </div>
-      <div class="wp-grid">
+    return `<div class="wp-grid">
         <div class="wp-h">KW</div>${WEEKDAYS_SHORT.map((d) => `<div class="wp-h">${d}</div>`).join('')}
         ${weeks
           .map((w) => {
@@ -2051,7 +2044,7 @@ function weekPicker(initial, excludeId, onPick, forTrip = false) {
                 const d = addDays(w, i);
                 const cls = [
                   'wp-day',
-                  d.getMonth() !== month.getMonth() ? 'out' : '',
+                  d.getMonth() !== m.getMonth() ? 'out' : '',
                   inWeek ? 'in-week' : '',
                   inWeek && (forTrip || (d.getMonth() + 1 === preview.month && d.getFullYear() === preview.year)) ? 'in-sheet' : '',
                   sameDay(d, selected) ? 'sel' : '',
@@ -2063,7 +2056,25 @@ function weekPicker(initial, excludeId, onPick, forTrip = false) {
               .join('')}`;
           })
           .join('')}
+      </div>`;
+  }
+
+  // Vormonat, Monat und Folgemonat liegen nebeneinander; beim Wischen wird der Streifen mit dem Finger verschoben
+  let strip = null;
+  let viewport = null;
+  function draw() {
+    const preview = newSheet(selected, '');
+    const exists = existingSheet(selected, excludeId);
+    const prevMonth = new Date(month.getFullYear(), month.getMonth() - 1, 1);
+    const nextMonth = new Date(month.getFullYear(), month.getMonth() + 1, 1);
+
+    wp.innerHTML = `
+      <div class="wp-nav">
+        <button class="icon-btn" data-wp="prev" aria-label="Voriger Monat">${ICON.chevronLeft}</button>
+        <b>${MONTHS[month.getMonth()]} ${month.getFullYear()}</b>
+        <button class="icon-btn" data-wp="next" aria-label="Nächster Monat">${ICON.chevronRight}</button>
       </div>
+      <div class="wp-viewport"><div class="wp-strip">${gridHTML(prevMonth)}${gridHTML(month)}${gridHTML(nextMonth)}</div></div>
       <div class="wp-legend">
         <span><i class="lg-kw sent"></i>${what} gesendet</span>
         <span><i class="lg-kw open"></i>${what} offen</span>
@@ -2083,7 +2094,10 @@ function weekPicker(initial, excludeId, onPick, forTrip = false) {
         ${holidaysLine()}
       </div>`
       }`;
-    if (slide) wp.querySelector('.wp-grid').classList.add(slide);
+    viewport = wp.querySelector('.wp-viewport');
+    strip = wp.querySelector('.wp-strip');
+    // Höhe nach dem sichtbaren Monat (5 oder 6 Wochen), nicht nach dem höchsten Nachbarmonat
+    viewport.style.height = `${strip.children[1].offsetHeight}px`;
   }
   /** Feiertage der gewählten Woche: „Feiertag: Fr 03.10. Tag der Deutschen Einheit“ */
   function holidaysLine() {
@@ -2094,33 +2108,78 @@ function weekPicker(initial, excludeId, onPick, forTrip = false) {
       .map((d) => `${WEEKDAYS_SHORT[(d.getDay() + 6) % 7]} ${fmtDayMonth(d)} ${escapeHtml(holidayName(d))}`);
     return list.length ? `<span class="wp-hol-line">Feiertag: ${list.join(', ')}</span>` : '';
   }
-  const shiftMonth = (dir) => {
-    month = new Date(month.getFullYear(), month.getMonth() + dir, 1);
-    draw(dir > 0 ? 'slide-next' : 'slide-prev');
-  };
+
+  const POS = { '-1': '0%', 0: '-33.3333%', 1: '-66.6667%' };
+  let animating = false;
+  /** Streifen einrasten lassen: dir −1 = Vormonat, 0 = zurück, 1 = Folgemonat */
+  function settle(dir) {
+    animating = true;
+    strip.style.transition = 'transform 0.28s cubic-bezier(0.25, 0.8, 0.3, 1)';
+    strip.style.transform = `translateX(${POS[dir]})`;
+    if (dir) viewport.style.height = `${strip.children[1 + dir].offsetHeight}px`;
+    setTimeout(() => {
+      animating = false;
+      if (dir) {
+        month = new Date(month.getFullYear(), month.getMonth() + dir, 1);
+        draw();
+      }
+    }, 290);
+  }
+  const shiftMonth = (dir) => !animating && settle(dir);
   draw();
 
-  // Wischen nach links/rechts blättert den Monat um
-  let swipe = null;
-  wp.addEventListener('touchstart', (e) => (swipe = e.touches.length === 1 ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null), { passive: true });
+  // Monat mit dem Finger ziehen (wie das Wischen zum Löschen)
+  let drag = null;
+  let draggedAt = 0;
   wp.addEventListener(
-    'touchend',
+    'touchstart',
     (e) => {
-      if (!swipe) return;
-      const dx = e.changedTouches[0].clientX - swipe.x;
-      const dy = e.changedTouches[0].clientY - swipe.y;
-      swipe = null;
-      if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy) * 1.5) shiftMonth(dx < 0 ? 1 : -1);
+      drag =
+        !animating && e.touches.length === 1 && e.target.closest('.wp-viewport')
+          ? { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now(), dx: 0, active: false, dead: false }
+          : null;
     },
     { passive: true }
   );
+  wp.addEventListener(
+    'touchmove',
+    (e) => {
+      if (!drag || drag.dead) return;
+      const dx = e.touches[0].clientX - drag.x;
+      const dy = e.touches[0].clientY - drag.y;
+      if (!drag.active) {
+        if (Math.abs(dy) > 10 && Math.abs(dy) >= Math.abs(dx)) return void (drag.dead = true);
+        if (Math.abs(dx) < 10 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+        drag.active = true;
+        drag.x = e.touches[0].clientX;
+        strip.style.transition = 'none';
+        return;
+      }
+      drag.dx = dx;
+      strip.style.transform = `translateX(calc(-33.3333% + ${dx}px))`;
+    },
+    { passive: true }
+  );
+  const endDrag = () => {
+    const d = drag;
+    drag = null;
+    if (!d || !d.active) return;
+    draggedAt = Date.now();
+    const fast = Math.abs(d.dx) / Math.max(1, Date.now() - d.t) > 0.5 && Math.abs(d.dx) > 30;
+    settle(Math.abs(d.dx) > viewport.offsetWidth * 0.25 || fast ? (d.dx < 0 ? 1 : -1) : 0);
+  };
+  wp.addEventListener('touchend', endDrag, { passive: true });
+  wp.addEventListener('touchcancel', endDrag, { passive: true });
 
   modal.addEventListener('click', (e) => {
     const t = e.target.closest('[data-wp],[data-date],[data-m]');
     if (!t) return;
     if (t.dataset.wp === 'prev') return shiftMonth(-1);
     if (t.dataset.wp === 'next') return shiftMonth(1);
-    if (t.dataset.date) selected = parseDate(t.dataset.date);
+    if (t.dataset.date) {
+      if (animating || Date.now() - draggedAt < 350) return; // nach dem Ziehen keinen Tag auswählen
+      selected = parseDate(t.dataset.date);
+    }
     else if (t.dataset.m === 'cancel') return closeModal();
     else if (t.dataset.m === 'ok') {
       closeModal();
