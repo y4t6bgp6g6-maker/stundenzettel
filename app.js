@@ -655,7 +655,9 @@ function syncNav() {
   const nav = document.querySelector('.nav');
   document.documentElement.style.setProperty('--nav-h', `${navHeight()}px`);
   navResize.disconnect();
-  if (nav) navResize.observe(nav);
+  // Rahmengröße beobachten: Der obere Rand (Uhrzeit, Dynamic Island) steckt im Innenabstand und kommt
+  // beim Start teils erst nachträglich dazu – die reine Inhaltshöhe ändert sich dabei nicht
+  if (nav) navResize.observe(nav, { box: 'border-box' });
 }
 new MutationObserver(syncNav).observe(app, { childList: true });
 
@@ -1848,6 +1850,17 @@ function mergeBackup(data) {
   let added = 0;
   let same = 0;
   const conflicts = [];
+  // Neues Gerät (noch kein Name eingetragen, z. B. nach dem Neu-Anlegen auf dem Home-Bildschirm):
+  // Einstellungen aus der Sicherung übernehmen – Name, Ort, ausgeblendete Vorschläge usw.
+  // Die fest vorgegebenen Werte (Wochenstunden, Bundesland, Zeitschritte) bleiben unverändert.
+  let settingsRestored = false;
+  if (!settings.name.trim() && data.settings && typeof data.settings === 'object' && String(data.settings.name || '').trim()) {
+    const fixed = ['target', 'hoursPerDay', 'state', 'minuteStep', 'signature'];
+    for (const [k, v] of Object.entries(data.settings)) if (!fixed.includes(k)) settings[k] = v;
+    settings.hiddenSuggestions = { site: [], work: [], ...settings.hiddenSuggestions };
+    saveSettings();
+    settingsRestored = true;
+  }
   const myName = settings.name.trim();
   let renamed = 0;
   for (const s of incoming) {
@@ -1887,7 +1900,7 @@ function mergeBackup(data) {
     }
     saveTrips();
   }
-  return { added, same, conflicts, signature, renamed, tripsAdded, tripsSame };
+  return { added, same, conflicts, signature, renamed, tripsAdded, tripsSame, settingsRestored };
 }
 
 /** Eine oder mehrere Dateien einlesen: Sicherung (.json), Stundenzettel als Numbers-Datei oder PDF */
@@ -1940,6 +1953,7 @@ async function importBackup(input) {
           if (tripConf) tp.push(`${tripConf} mit Unterschieden`);
           parts.push(tp.join(', '));
         }
+        if (r.settingsRestored) parts.push('Einstellungen übernommen');
         if (r.signature) parts.push('Unterschrift übernommen');
         if (r.renamed) parts.push(`Name bei ${r.renamed} auf „${escapeHtml(settings.name.trim())}“ geändert`);
         lines.push(`${label}: ${parts.join(', ')}`);

@@ -76,15 +76,6 @@ input { font: inherit; color: inherit; }
   padding: calc(env(safe-area-inset-top) + 6px) 16px 6px;
   min-height: calc(env(safe-area-inset-top) + 56px);
 }
-.nav::before {
-  content: '';
-  position: absolute;
-  inset: 0 0 auto;
-  height: env(safe-area-inset-top);
-  z-index: -1;
-  pointer-events: none;
-  background: var(--bg);
-}
 .nav-title { font-weight: 600; text-align: center; white-space: nowrap; }
 .nav-btn {
   display: inline-flex;
