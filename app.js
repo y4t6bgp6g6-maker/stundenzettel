@@ -2505,7 +2505,19 @@ function askHideSuggestion(text) {
 function showChips(input) {
   suggestInput = input;
   const list = suggestionsFor(input).slice(0, 30);
-  suggestGrid.innerHTML = list.map((v) => `<button class="chip" data-chip="${escapeHtml(v)}">${escapeHtml(v)}</button>`).join('');
+  // Zwei unabhängige Reihen, jede Kapsel so breit wie ihr Text: der nächste Vorschlag kommt in die
+  // kürzere Reihe (geschätzt nach Zeichen), so bleiben beide etwa gleich lang und man sieht mehr Vorschläge
+  const rows = [[], []];
+  const len = [0, 0];
+  for (const v of list) {
+    const r = len[0] <= len[1] ? 0 : 1;
+    rows[r].push(v);
+    len[r] += v.length + 4;
+  }
+  suggestGrid.innerHTML = rows
+    .filter((r) => r.length)
+    .map((r) => `<div class="suggest-row">${r.map((v) => `<button class="chip" data-chip="${escapeHtml(v)}">${escapeHtml(v)}</button>`).join('')}</div>`)
+    .join('');
   suggestGrid.scrollLeft = 0;
   suggestBar.classList.toggle('show', list.length > 0);
   placeSuggestBar();
