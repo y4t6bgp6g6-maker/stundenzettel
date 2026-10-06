@@ -25,8 +25,8 @@ const fmtDayMonth = (d) => `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.`;
 const fmtDec = (minutes) => (minutes / 60).toFixed(2).replace('.', ',');
 /** Stunden im PDF: immer dezimal, ohne Einheit („8,50“) */
 const fmtHours = fmtDec;
-/** Stunden in der App: immer Stunden und Minuten („8h 30m“) */
-const fmtH = (minutes) => `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+/** Stunden in der App: immer Stunden und Minuten („8h 30m“), volle Stunden ohne Minuten („8h“) */
+const fmtH = (minutes) => `${Math.floor(minutes / 60)}h${minutes % 60 ? ` ${minutes % 60}m` : ''}`;
 /** Minuten seit Mitternacht: 480 → 08:00 */
 const fmtTime = (m) => `${pad(Math.floor(m / 60) % 24)}:${pad(m % 60)}`;
 
