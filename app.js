@@ -23,11 +23,10 @@ const fmtShort = (d) => `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${String(d
 const fmtDayMonth = (d) => `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.`;
 /** Minuten als Dezimalstunden: 90 → 1,50 */
 const fmtDec = (minutes) => (minutes / 60).toFixed(2).replace('.', ',');
-/** Stunden im eingestellten Format: „8,00“ oder „8h 0m“ (für PDF, ohne Einheit) */
-const fmtHours = (minutes) =>
-  settings.hourFormat === 'hm' ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : fmtDec(minutes);
-/** Wie fmtHours, mit Einheit für die App: „8,00 h“ oder „8h 0m“ */
-const fmtH = (minutes) => (settings.hourFormat === 'hm' ? fmtHours(minutes) : `${fmtDec(minutes)} h`);
+/** Stunden im PDF: immer dezimal, ohne Einheit („8,50“) */
+const fmtHours = fmtDec;
+/** Stunden in der App: immer Stunden und Minuten („8h 30m“) */
+const fmtH = (minutes) => `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 /** Minuten seit Mitternacht: 480 → 08:00 */
 const fmtTime = (m) => `${pad(Math.floor(m / 60) % 24)}:${pad(m % 60)}`;
 
@@ -66,7 +65,8 @@ const rowIsEmpty = (r) => r.start == null && r.end == null && !r.site && !r.work
 const rowMinutes = (r) => (r.start == null || r.end == null ? null : r.end >= r.start ? r.end - r.start : r.end + 1440 - r.start);
 const dayWorked = (d) => d.rows.reduce((s, r) => s + (rowMinutes(r) || 0), 0);
 /** Gutgeschriebene Minuten für Krankheit, Urlaub usw. laut Einstellungen */
-const statusCredit = (status) => (settings.credit[status] ? Math.round(settings.hoursPerDay * 60) : 0);
+/** Krank, Urlaub und Feiertag zählen 8 Stunden, Frei zählt 0 */
+const statusCredit = (status) => (status === 'frei' ? 0 : Math.round(settings.hoursPerDay * 60));
 const dayTotal = (d) => (d.status ? statusCredit(d.status) : Math.max(0, dayWorked(d) - (d.pause || 0)));
 const dayHasTimes = (d) => d.rows.some((r) => r.start != null || r.end != null);
 /** Am Tag wurde schon etwas eingetragen, aber noch keine Pause (nur neue Zettel haben pause: null) */
@@ -136,8 +136,7 @@ const sheetTitle = (s) => `Stundenzettel ${fmtShort(sheetFirstDate(s))} - ${fmtS
 const sheetTotal = (s) => sheetActiveDays(s).reduce((t, i) => t + dayTotal(s.days[i]), 0);
 const sheetOvertime = (s, targetHours) => Math.max(0, sheetTotal(s) - Math.round(targetHours * 60));
 /** Soll des Zettels in Stunden: anteilig je Werktag Mo–Fr des Monats oder das volle Wochen-Soll */
-const sheetTarget = (s) =>
-  settings.prorateTarget ? (settings.target / 5) * sheetActiveDays(s).filter((i) => i < 5).length : settings.target;
+const sheetTarget = (s) => (settings.target / 5) * sheetActiveDays(s).filter((i) => i < 5).length;
 const sheetMatches = (s, anchor) => {
   const n = newSheet(anchor, '');
   return n.weekStart === s.weekStart && n.year === s.year && n.month === s.month;
@@ -149,14 +148,10 @@ const STORE_KEY = 'stundenzettel.sheets.v1';
 const SETTINGS_KEY = 'stundenzettel.settings.v1';
 const DEFAULT_SETTINGS = {
   name: '',
-  overtime: true,
   target: 40,
   hoursPerDay: 8,
   minuteStep: 30,
-  hourFormat: 'dec',
   state: 'NI',
-  credit: { krank: true, urlaub: true, feiertag: true, frei: false },
-  prorateTarget: false,
   place: '',
   signature: null,
   hiddenSuggestions: { site: [], work: [] },
@@ -173,7 +168,6 @@ function readJson(key, fallback) {
 
 let sheets = readJson(STORE_KEY, []);
 let settings = { ...DEFAULT_SETTINGS, ...readJson(SETTINGS_KEY, {}) };
-settings.credit = { ...DEFAULT_SETTINGS.credit, ...settings.credit };
 settings.hiddenSuggestions = { site: [], work: [], ...settings.hiddenSuggestions };
 delete settings.recipient; // frühere Einstellungen, werden nicht mehr verwendet
 delete settings.pdfFrame;
@@ -184,6 +178,12 @@ settings.target = 40;
 settings.hoursPerDay = 8;
 settings.state = 'NI';
 delete settings.vacationDays;
+// Ebenfalls fest: Anzeige in der App „8h 30m“, im PDF dezimal; Überstunden immer, bei Teilwochen anteilig;
+// Krank/Urlaub/Feiertag zählen 8 Stunden, Frei 0
+delete settings.hourFormat;
+delete settings.prorateTarget;
+delete settings.credit;
+delete settings.overtime;
 
 /** Urlaubs- und Krankheitstage je Jahr (nach Datum des Tages) */
 function absenceStats() {
@@ -620,7 +620,7 @@ const balanceClass = (min) => (min > 0 ? 'plus' : min < 0 ? 'minus' : '');
 
 function renderStats() {
   const stats = absenceStats();
-  const account = settings.overtime ? overtimeAccount() : new Map();
+  const account = overtimeAccount();
   const current = new Date().getFullYear();
   if (!stats.has(current)) stats.set(current, { urlaub: 0, krank: 0 });
   account.forEach((_, y) => { if (!stats.has(y)) stats.set(y, { urlaub: 0, krank: 0 }); });
@@ -646,7 +646,7 @@ function renderStats() {
       })
       .join('')}
     <p class="footnote">Gezählt werden alle Tage, die du als Urlaub oder Krankheit markiert hast.</p>
-    ${settings.overtime && sheets.length ? `<p class="footnote">Überstunden: Pro Werktag zählt alles über ${fmtH(Math.round((settings.target * 60) / 5))}. Nur Tage mit Stundenzettel zählen. Plus und Minus werden verrechnet.</p>` : ''}`;
+    ${sheets.length ? `<p class="footnote">Überstunden: Pro Werktag zählt alles über ${fmtH(Math.round((settings.target * 60) / 5))}. Nur Tage mit Stundenzettel zählen. Plus und Minus werden verrechnet.</p>` : ''}`;
 }
 
 /** Reisekosten je Jahr: Tage auf Montage und Spesen (nach dem Datum der Tage) */
@@ -744,11 +744,8 @@ function renderEditor(id) {
     <div class="sum-bar" id="summary">${summaryHTML(s)}</div>`;
 }
 
-/** Kurze Stundenangabe für die Tagesleiste: „9,5“ bzw. „9:30“ */
-const fmtTiny = (min) =>
-  settings.hourFormat === 'hm'
-    ? `${Math.floor(min / 60)}:${pad(min % 60)}`
-    : String(Math.round((min / 60) * 100) / 100).replace('.', ',');
+/** Kurze Stundenangabe für die Tagesleiste: „9:30“ */
+const fmtTiny = (min) => `${Math.floor(min / 60)}:${pad(min % 60)}`;
 
 /** Tagesleiste: Mo–So mit Stunden, heute markiert */
 function dayBarHTML(s) {
@@ -866,12 +863,9 @@ function rowHTML(day, r) {
 }
 
 function summaryHTML(s) {
-  let html = `<div class="sum-pill"><span class="sum-label">Stunden Gesamt</span><b>${fmtH(sheetTotal(s))}</b></div>`;
-  if (settings.overtime) {
-    const target = sheetTarget(s);
-    html += `<div class="sum-pill"><span class="sum-label">davon Überstunden</span><span class="sum-value"><b>${fmtH(sheetOvertime(s, target))}</b><span class="sum-sub">ab ${fmtH(Math.round(target * 60))}</span></span></div>`;
-  }
-  return html;
+  const target = sheetTarget(s);
+  return `<div class="sum-pill"><span class="sum-label">Stunden Gesamt</span><b>${fmtH(sheetTotal(s))}</b></div>
+    <div class="sum-pill"><span class="sum-label">davon Überstunden</span><span class="sum-value"><b>${fmtH(sheetOvertime(s, target))}</b><span class="sum-sub">ab ${fmtH(Math.round(target * 60))}</span></span></div>`;
 }
 
 const currentSheet = () => findSheet(editorId);
@@ -1021,7 +1015,7 @@ function askDelete(id, leave) {
 // ───────────────────────── PDF & Senden ─────────────────────────
 
 function pdfFileFor(s) {
-  const blob = buildTimesheetPdf(s, settings.overtime ? sheetTarget(s) : null);
+  const blob = buildTimesheetPdf(s, sheetTarget(s));
   return new File([blob], `${sheetTitle(s)}.pdf`, { type: 'application/pdf' });
 }
 
@@ -1678,31 +1672,7 @@ function renderSettings() {
           <option value="15" ${settings.minuteStep === 15 ? 'selected' : ''}>15 Minuten</option>
           <option value="30" ${settings.minuteStep === 30 ? 'selected' : ''}>30 Minuten</option>
         </select></label>
-      <label class="field"><span>Stundenformat</span>
-        <select data-s="hourFormat">
-          <option value="dec" ${settings.hourFormat !== 'hm' ? 'selected' : ''}>Dezimal (8,50)</option>
-          <option value="hm" ${settings.hourFormat === 'hm' ? 'selected' : ''}>Stunden/Min. (8h 30m)</option>
-        </select></label>
     </div>
-    <p class="footnote">Gilt in der App und im PDF.</p>
-
-    <h2 class="section-title">Überstunden</h2>
-    <div class="card form">
-      <label class="field toggle-field"><span>Überstunden berechnen</span><input type="checkbox" class="toggle" data-s="overtime" ${settings.overtime ? 'checked' : ''}></label>
-      <label class="field toggle-field ${settings.overtime ? '' : 'disabled'}" id="prorate-field"><span>Überstunden bei Teilwochen anteilig</span><input type="checkbox" class="toggle" data-s="prorateTarget" ${settings.prorateTarget ? 'checked' : ''} ${settings.overtime ? '' : 'disabled'}></label>
-    </div>
-    <p class="footnote">Alles über 40 Stunden pro Woche sind Überstunden. „Anteilig“: Bei einer halben Woche am Monatsende zählt nur der Anteil, z. B. 24 h für 3 Tage.</p>
-
-    <h2 class="section-title">Krankheit, Urlaub, Feiertage</h2>
-    <div class="card form">
-      ${Object.entries(DAY_STATUS)
-        .map(
-          ([key, label]) =>
-            `<label class="field toggle-field"><span>${label}</span><input type="checkbox" class="toggle" data-s="credit.${key}" ${settings.credit[key] ? 'checked' : ''}></label>`
-        )
-        .join('')}
-    </div>
-    <p class="footnote">Eingeschaltet: Der Tag zählt 8 Stunden. Ausgeschaltet: 0 Stunden. Feiertage gelten für Niedersachsen.</p>
 
     ${hiddenSuggestionsHTML()}
 
@@ -2515,19 +2485,8 @@ document.addEventListener('input', (e) => {
     refreshListBody();
   } else if (t.dataset.s) {
     const key = t.dataset.s;
-    if (key === 'overtime') {
-      settings.overtime = t.checked;
-      ['prorate-field'].forEach((fid) => {
-        const field = document.getElementById(fid);
-        field.classList.toggle('disabled', !t.checked);
-        field.querySelector('input').disabled = !t.checked;
-      });
-    } else if (key === 'minuteStep') {
+    if (key === 'minuteStep') {
       settings.minuteStep = Number(t.value);
-    } else if (key === 'prorateTarget') {
-      settings[key] = t.checked;
-    } else if (key.startsWith('credit.')) {
-      settings.credit[key.slice(7)] = t.checked;
     } else {
       settings[key] = t.value;
     }
