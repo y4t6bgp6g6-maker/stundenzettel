@@ -2214,7 +2214,7 @@ function timePicker(title, initial, hasValue, onDone) {
 function weekPicker(initial, excludeId, onPick, forTrip = false) {
   let selected = startOfDay(initial);
   let month = new Date(selected.getFullYear(), selected.getMonth(), 1);
-  const modal = openModal(`${modalHead('Woche wählen', 'Übernehmen')}<div class="wp"></div>`, 'sheet');
+  const modal = openModal(`${modalHead('Woche wählen', 'Übernehmen')}<div class="wp"></div>`, 'sheet wp-sheet');
   const wp = modal.querySelector('.wp');
 
   // Wochen, für die es schon einen Zettel bzw. eine Abrechnung gibt: Montag → 'sent' oder 'open' (offen hat Vorrang)

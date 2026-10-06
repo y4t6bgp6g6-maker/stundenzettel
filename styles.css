@@ -517,7 +517,9 @@ input { font: inherit; color: inherit; }
 .wheels .wheel { z-index: 1; }
 
 /* Wochenauswahl */
-.wp { padding: 6px 12px 4px; }
+.wp { padding: 6px 12px 0; }
+/* Wochenauswahl reicht weiter nach unten: nur so viel Abstand, dass der Text über dem Home-Balken bleibt */
+.modal.sheet.wp-sheet { padding-bottom: max(10px, calc(env(safe-area-inset-bottom) - 12px)); }
 .wp-nav { display: flex; align-items: center; justify-content: space-between; padding: 4px 0 8px; font-size: 18px; }
 .icon-btn { width: 44px; height: 44px; display: grid; place-items: center; color: var(--accent); }
 .wp-grid { display: grid; grid-template-columns: 34px repeat(7, 1fr); row-gap: 4px; }
@@ -566,7 +568,7 @@ input { font: inherit; color: inherit; }
 .wp-viewport { overflow: hidden; touch-action: pan-y; }
 .wp-strip { display: flex; align-items: flex-start; width: 300%; transform: translateX(-33.3333%); }
 .wp-strip > .wp-grid { flex: none; width: 33.3333%; }
-.wp-preview { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 14px 0 6px; text-align: center; }
+.wp-preview { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 14px 0 0; text-align: center; }
 .wp-preview .muted { font-size: 13px; }
 
 /* Aktionsmenü */
