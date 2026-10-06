@@ -262,6 +262,10 @@ function sheetProblems(s) {
       if (endBeforeStart(r)) problems.push(`${where}: Ende ${fmtTime(r.end)} liegt vor Beginn ${fmtTime(r.start)}`);
       if (sameStartEnd(r)) problems.push(`${where}: Beginn und Ende sind gleich (${fmtTime(r.start)})`);
       if (missing.length) problems.push(`${where}: ${missing.join(', ')} ${missing.length > 1 ? 'fehlen' : 'fehlt'}`);
+      for (const f of ['site', 'work']) {
+        const t = typoFor(f, r);
+        if (t) problems.push(`${where}: „${t.part}“ – meintest du „${t.suggestion}“?`);
+      }
       if (r.start != null && r.end != null && r.end > r.start) timed.push(r);
     });
     if (rowsOutOfOrder(d).size) problems.push(`${day}: Zeilen nicht in zeitlicher Reihenfolge`);
@@ -938,7 +942,9 @@ function rowHTML(day, r) {
       ${rowCount > 1 ? `<button class="row-del" data-act="delrow" aria-label="Zeile löschen">${ICON.close}</button>` : '<span class="row-del-space"></span>'}
     </div>
     <div class="suggest-wrap ${fieldMissing(day, r, 'site') ? 'missing' : ''}"><span class="field-icon">${ICON.pin}</span><span class="warn" aria-label="fehlt">⚠️</span><input class="txt" data-f="site" placeholder="Ort" value="${escapeHtml(r.site)}" autocomplete="off" autocapitalize="sentences" enterkeyhint="next"></div>
+    ${typoHintHTML('site', r)}
     <div class="suggest-wrap ${fieldMissing(day, r, 'work') ? 'missing' : ''}"><span class="field-icon">${ICON.tool}</span><span class="warn" aria-label="fehlt">⚠️</span><input class="txt" data-f="work" placeholder="Arbeit" value="${escapeHtml(r.work)}" autocomplete="off" autocapitalize="sentences" enterkeyhint="done"></div>
+    ${typoHintHTML('work', r)}
   </div>`;
 }
 
@@ -2477,6 +2483,80 @@ suggestBar.id = 'suggest-bar';
 suggestBar.innerHTML = '<div class="suggest-grid"></div>';
 document.body.appendChild(suggestBar);
 const suggestGrid = suggestBar.firstChild;
+/** Abstand zweier Texte: Buchstaben einfügen, löschen, ersetzen oder zwei benachbarte vertauschen zählt je 1 */
+function editDistance(a, b) {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+    }
+  return d[a.length][b.length];
+}
+
+/**
+ * Tippfehler bei Baustelle / Art der Arbeit: Ein Eintrag, den es so in keiner anderen Zeile gibt, der aber fast einem
+ * schon benutzten gleicht (nur Groß-/Kleinschreibung, Leerzeichen, Satzzeichen oder 1–2 Buchstaben anders).
+ * Kurze Texte sind strenger: unter 5 Zeichen nie, unter 10 Zeichen höchstens 1 Buchstabe Unterschied; andere Zahlen nie.
+ * Ergebnis: { part, suggestion } oder null. „So lassen“ (✕) merkt sich der Eintrag in row.typoOk.
+ */
+function typoFor(field, row) {
+  const value = row[field] || '';
+  if (!value.trim() || (row.typoOk && row.typoOk[field] === value)) return null;
+  // Schreibweisen aus allen anderen Zeilen: sameKey → { Schreibweise → Anzahl }
+  const known = new Map();
+  for (const sh of sheets)
+    for (const d of sh.days)
+      for (const r of d.rows) {
+        if (r === row) continue;
+        for (const part of field === 'work' ? (r[field] || '').split(',') : [r[field] || '']) {
+          const v = part.trim();
+          if (!v) continue;
+          if (!known.has(sameKey(v))) known.set(sameKey(v), new Map());
+          const m = known.get(sameKey(v));
+          m.set(v, (m.get(v) || 0) + 1);
+        }
+      }
+  const hidden = new Set(settings.hiddenSuggestions[field].map(sameKey));
+  const best = (m) => [...m].sort((a, b) => b[1] - a[1])[0];
+  const candidates = [...known].filter(([k]) => !hidden.has(k)).map(([, m]) => best(m));
+  for (const raw of field === 'work' ? value.split(',') : [value]) {
+    const part = raw.trim();
+    if (!part) continue;
+    const same = known.get(sameKey(part));
+    if (same && same.has(part)) continue; // genau so schon benutzt
+    if (same && !hidden.has(sameKey(part))) return { part, suggestion: best(same)[0] };
+    const key = searchKey(part);
+    const max = key.length >= 10 ? 2 : key.length >= 5 ? 1 : 0;
+    let hit = null;
+    const digits = (x) => x.replace(/\D/g, '');
+    for (const [v, n] of candidates) {
+      // Andere Zahlen („Halle 3“ / „Halle 4“, „Markt 12“ / „Markt 13“) sind kein Tippfehler
+      if (digits(searchKey(v)) !== digits(key)) continue;
+      const dist = searchKey(v) === key ? 0 : max ? editDistance(key, searchKey(v)) : Infinity;
+      if (dist <= max && (!hit || dist < hit.dist || (dist === hit.dist && n > hit.n))) hit = { v, n, dist };
+    }
+    if (hit) return { part, suggestion: hit.v };
+  }
+  return null;
+}
+const typoHintHTML = (field, row) => {
+  const t = typoFor(field, row);
+  return t
+    ? `<div class="typo-hint" data-typo="${field}">⚠️ Meintest du <button data-act="typo-fix" data-f="${field}" data-v="${escapeHtml(t.suggestion)}" data-p="${escapeHtml(t.part)}">„${escapeHtml(t.suggestion)}“</button>?<button class="typo-x" data-act="typo-ok" data-f="${field}" aria-label="So lassen">✕</button></div>`
+    : '';
+};
+/** Hinweis eines Feldes neu setzen (nach dem Verlassen des Feldes); beim Tippen ausblenden */
+function refreshTypoHint(input, show = true) {
+  const { row } = rowContext(input);
+  const wrap = input.closest('.suggest-wrap');
+  const old = wrap.nextElementSibling;
+  if (old && old.classList.contains('typo-hint')) old.remove();
+  if (show && row) wrap.insertAdjacentHTML('afterend', typoHintHTML(input.dataset.f, row));
+}
+
 let suggestInput = null;
 
 /** Art der Arbeit: Teile vor dem letzten Komma (fertig) und der Text dahinter (Suchbegriff) */
@@ -2809,6 +2889,28 @@ document.addEventListener('click', (e) => {
       refreshDay(dayIndex);
       break;
     }
+    case 'typo-fix': {
+      // Vorgeschlagene Schreibweise übernehmen (bei Art der Arbeit nur den betroffenen Teil)
+      const input = el.closest('.row').querySelector(`[data-f="${el.dataset.f}"]`);
+      input.value =
+        el.dataset.f === 'work'
+          ? input.value
+              .split(',')
+              .map((p) => (p.trim() === el.dataset.p ? el.dataset.v : p.trim()))
+              .filter(Boolean)
+              .join(', ')
+          : el.dataset.v;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      break;
+    }
+    case 'typo-ok': {
+      // „So lassen“: Hinweis für genau diesen Text nicht mehr zeigen
+      const { s, row } = rowContext(el);
+      row.typoOk = { ...row.typoOk, [el.dataset.f]: row[el.dataset.f] };
+      saveSheets(s);
+      el.closest('.typo-hint').remove();
+      break;
+    }
     case 'delrow': {
       const { s, dayIndex, day, rowIndex, row } = rowContext(el);
       const remove = () => {
@@ -2914,6 +3016,9 @@ document.addEventListener('input', (e) => {
       row[t.dataset.f] = t.value;
       const { day } = rowContext(t);
       updateDayWarnings(t.closest('.day'), day);
+      // Tippfehler-Hinweis erst nach dem Verlassen des Feldes (nicht während des Tippens)
+      if (document.activeElement === t) refreshTypoHint(t, false);
+      else refreshTypoHint(t);
     }
     showChips(t);
     saveSheets(s);
@@ -2990,6 +3095,7 @@ document.addEventListener('focusout', (e) => {
   if (!e.target.matches('.txt')) return;
   trimWorkInput(e.target);
   if (suggestInput === e.target) hideChips();
+  if (e.target.dataset.f && currentSheet()) refreshTypoHint(e.target);
 });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && e.target.matches('input:not([type=checkbox])')) {

@@ -917,6 +917,9 @@ button.nav-title { font-size: 17px; }
 .trip-text:focus { border-bottom-color: var(--accent); }
 .trip-text::placeholder { color: var(--muted); opacity: 0.7; }
 .trip-ditto { font-size: 13px; margin: 6px 0 0; }
+.typo-hint { display: flex; align-items: center; gap: 4px; margin: 4px 0 2px 24px; font-size: 14px; color: var(--warning); }
+.typo-hint [data-act="typo-fix"] { color: var(--accent); font-weight: 600; }
+.typo-x { margin-left: auto; padding: 4px 6px; color: var(--muted); font-size: 13px; }
 .trip-issue { font-size: 13px; margin: 6px 0 0; color: var(--warning); }
 .trip-meal { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
 .trip-meal input {
