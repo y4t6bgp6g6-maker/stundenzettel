@@ -1815,6 +1815,24 @@ function sheetDiff(mine, theirs) {
     .map((i) => ({ i, mine: dayText(mine.days[i]), theirs: dayText(theirs.days[i] || { rows: [] }) }))
     .filter((x) => x.mine !== x.theirs);
 }
+/** Ein Reisetag als Text für den Vergleich; „–“, wenn der Tag nicht zur Abrechnung gehört */
+function tripDayText(r) {
+  if (!r) return '–';
+  const time = r.start != null || r.end != null ? `${r.start != null ? fmtClock(r.start) : '?'}–${r.end != null ? fmtClock(r.end) : '?'}` : '';
+  return [time, [r.places.trim(), r.works.trim()].filter(Boolean).join(' · '), r.meal ? fmtEuro(r.meal) : ''].filter(Boolean).join(' ') || '–';
+}
+/** Unterschiede zweier Fassungen derselben Abrechnung: [{ label, mine, theirs }] (Tage, dazu Ort/Datum der Unterschrift) */
+function tripDiff(mine, theirs) {
+  const a = new Map(tripRows(mine).map((r) => [r.iso, r]));
+  const b = new Map(tripRows(theirs).map((r) => [r.iso, r]));
+  const out = [...new Set([...a.keys(), ...b.keys()])].sort().map((iso) => {
+    const d = parseDate(iso);
+    return { label: `${WEEKDAYS_SHORT[(d.getDay() + 6) % 7]} ${fmtDayMonth(d)}`, mine: tripDayText(a.get(iso)), theirs: tripDayText(b.get(iso)) };
+  });
+  const sign = (t) => [(t.place || '').trim(), t.signDate ? fmtShort(parseDate(t.signDate)) : ''].filter(Boolean).join(', ') || '–';
+  out.push({ label: 'Ort, Datum', mine: sign(mine), theirs: sign(theirs) });
+  return out.filter((x) => x.mine !== x.theirs);
+}
 const weekKey = (s) => `${s.weekStart}|${s.year}|${s.month}`;
 /** „12.10.26, 14:03“ */
 const fmtStamp = (ms) => (ms ? `${fmtShort(new Date(ms))}, ${fmtTime(new Date(ms).getHours() * 60 + new Date(ms).getMinutes())}` : 'unbekannt');
@@ -1852,18 +1870,23 @@ function mergeBackup(data) {
     saveSettings();
     signature = true;
   }
-  // Reisekostenabrechnungen: gleiche ID → die zuletzt geänderte Fassung gewinnt
+  // Reisekostenabrechnungen (gleiche ID): gleich → nichts, verschieden → Rückfrage wie bei den Zetteln
+  let tripsAdded = 0;
+  let tripsSame = 0;
   if (Array.isArray(data.trips)) {
-    const tripById = new Map(trips.map((t) => [t.id, t]));
-    for (const t of data.trips) {
-      if (!t || !t.id || !Array.isArray(t.dates)) continue;
-      const cur = tripById.get(t.id);
-      if (!cur || (t.updatedAt || 0) > (cur.updatedAt || 0)) tripById.set(t.id, { over: {}, ...t, ...(myName ? { name: myName } : {}) });
+    for (const raw of data.trips) {
+      if (!raw || !raw.id || !Array.isArray(raw.dates)) continue;
+      const t = { over: {}, ...raw, ...(myName ? { name: myName } : {}) };
+      const cur = findTrip(t.id);
+      if (!cur) {
+        trips.push(t);
+        tripsAdded++;
+      } else if (tripDiff(cur, t).length) conflicts.push({ trip: true, existing: cur, incoming: t, stamp: t.updatedAt, stampLabel: 'geändert', backup: true });
+      else tripsSame++;
     }
-    trips = [...tripById.values()];
     saveTrips();
   }
-  return { added, same, conflicts, signature, renamed };
+  return { added, same, conflicts, signature, renamed, tripsAdded, tripsSame };
 }
 
 /** Eine oder mehrere Dateien einlesen: Sicherung (.json), Stundenzettel als Numbers-Datei oder PDF */
@@ -1893,6 +1916,7 @@ async function importBackup(input) {
   const lines = [];
   const conflicts = [];
   let total = 0;
+  let tripCount = 0;
   toast(files.length > 1 ? `${files.length} Dateien werden eingelesen …` : 'Wird eingelesen …', 10000);
   for (const file of files) {
     const label = `<b>${escapeHtml(file.name)}</b>`;
@@ -1902,10 +1926,19 @@ async function importBackup(input) {
       if (/\.json$/i.test(file.name) || head === 0x7b || head === 0x5b) {
         const r = mergeBackup(JSON.parse(new TextDecoder().decode(buf)));
         total += r.added;
+        tripCount += r.tripsAdded;
         r.conflicts.forEach((c) => conflicts.push({ ...c, file: file.name }));
+        const sheetConf = r.conflicts.filter((c) => !c.trip).length;
+        const tripConf = r.conflicts.length - sheetConf;
         const parts = [`${r.added} Stundenzettel neu`];
         if (r.same) parts.push(`${r.same} schon vorhanden (gleich)`);
-        if (r.conflicts.length) parts.push(`${r.conflicts.length} mit Unterschieden`);
+        if (sheetConf) parts.push(`${sheetConf} mit Unterschieden`);
+        if (r.tripsAdded || r.tripsSame || tripConf) {
+          const tp = [`${r.tripsAdded} Reisekostenabrechnung${r.tripsAdded === 1 ? '' : 'en'} neu`];
+          if (r.tripsSame) tp.push(`${r.tripsSame} schon vorhanden (gleich)`);
+          if (tripConf) tp.push(`${tripConf} mit Unterschieden`);
+          parts.push(tp.join(', '));
+        }
         if (r.signature) parts.push('Unterschrift übernommen');
         if (r.renamed) parts.push(`Name bei ${r.renamed} auf „${escapeHtml(settings.name.trim())}“ geändert`);
         lines.push(`${label}: ${parts.join(', ')}`);
@@ -1936,24 +1969,31 @@ async function importBackup(input) {
     }
   }
   document.getElementById('toast').classList.remove('show');
-  // Zettel mit Unterschieden: selbst entscheiden (einzeln, oder alle ersetzen / alle überspringen)
+  // Zettel und Abrechnungen mit Unterschieden: selbst entscheiden (einzeln, oder alle ersetzen / alle überspringen)
   let all = null;
   for (let k = 0; k < conflicts.length; k++) {
     const c = conflicts[k];
     const choice = all || (await askConflict(c, conflicts.length - k));
     if (choice === 'replaceAll' || choice === 'keepAll') all = choice;
     const replace = choice === 'replace' || choice === 'replaceAll';
-    const range = `${fmtShort(sheetFirstDate(c.existing))} – ${fmtShort(sheetLastDate(c.existing))}`;
     if (replace) {
-      replaceSheet(c);
-      total++;
+      if (c.trip) {
+        replaceTrip(c);
+        tripCount++;
+      } else {
+        replaceSheet(c);
+        total++;
+      }
     }
-    lines.push(`<b>${range}</b>: ${replace ? 'durch die neue Fassung ersetzt' : 'Fassung in der App behalten'}`);
+    lines.push(`<b>${escapeHtml(conflictTitle(c))}</b>: ${replace ? 'durch die neue Fassung ersetzt' : 'Fassung in der App behalten'}`);
   }
-  if (conflicts.length) saveSheets();
+  if (conflicts.some((c) => !c.trip)) saveSheets();
+  if (conflicts.some((c) => c.trip)) saveTrips();
   if (currentView === 'settings') renderSettings();
   if (currentView === 'list') renderList();
-  infoDialog(total ? `${total} Stundenzettel eingelesen` : 'Nichts eingelesen', `<ul class="problem-list">${lines.map((l) => `<li>${l}</li>`).join('')}</ul>`);
+  if (currentView === 'trips') renderTripList();
+  const done = [total ? `${total} Stundenzettel` : '', tripCount ? `${tripCount} Reisekostenabrechnung${tripCount === 1 ? '' : 'en'}` : ''].filter(Boolean);
+  infoDialog(done.length ? `${done.join(' und ')} eingelesen` : 'Nichts eingelesen', `<ul class="problem-list">${lines.map((l) => `<li>${l}</li>`).join('')}</ul>`);
 }
 
 /** Neue Fassung übernehmen; der Zettel behält seine ID (Verknüpfung zu Reisekosten), aus Dateien auch den Status */
@@ -1968,26 +2008,40 @@ function replaceSheet(c) {
   existing.updatedAt = Date.now();
 }
 
-/** Rückfrage bei einem doppelten Zettel mit Unterschieden; Ergebnis: 'keep' | 'replace' | 'keepAll' | 'replaceAll' */
+/** Neue Fassung einer Abrechnung übernehmen (ID bleibt) */
+function replaceTrip(c) {
+  Object.assign(c.existing, { ...c.incoming, id: c.existing.id });
+  c.existing.updatedAt = Date.now();
+}
+
+/** „06.07.26 – 10.07.26“ (Zettel) bzw. „Reisekostenabrechnung 06.07.26 - 08.07.26“ */
+const conflictTitle = (c) =>
+  c.trip ? tripTitle(c.existing) : `${fmtShort(sheetFirstDate(c.existing))} – ${fmtShort(sheetLastDate(c.existing))}`;
+
+/** Rückfrage bei einem doppelten Zettel (oder einer Abrechnung) mit Unterschieden; Ergebnis: 'keep' | 'replace' | 'keepAll' | 'replaceAll' */
 function askConflict(c, remaining) {
   return new Promise((resolve) => {
     const { existing: mine, incoming: theirs } = c;
     const sentLabel = (s) => (s.sentAt ? 'gesendet' : 'offen');
-    const diff = sheetDiff(mine, theirs)
+    const sum = (x) => (c.trip ? fmtEuro(tripTotal(tripRows(x))) : fmtH(sheetTotal(x)));
+    const diffs = c.trip
+      ? tripDiff(mine, theirs)
+      : sheetDiff(mine, theirs).map((d) => ({ ...d, label: `${WEEKDAYS_SHORT[d.i]} ${fmtDayMonth(sheetDate(mine, d.i))}` }));
+    const diff = diffs
       .map(
-        (d) => `<li><b>${WEEKDAYS_SHORT[d.i]} ${fmtDayMonth(sheetDate(mine, d.i))}</b>
+        (d) => `<li><b>${d.label}</b>
           <span class="cf-line"><span class="cf-tag app">App</span>${escapeHtml(d.mine)}</span>
           <span class="cf-line"><span class="cf-tag new">Neu</span>${escapeHtml(d.theirs)}</span></li>`
       )
       .join('');
     const modal = openModal(
       `<div class="alert-body cf">
-        <b>Stundenzettel doppelt</b>
+        <b>${c.trip ? 'Reisekostenabrechnung doppelt' : 'Stundenzettel doppelt'}</b>
         <div class="alert-msg">
-          <p class="cf-intro"><b>${fmtShort(sheetFirstDate(mine))} – ${fmtShort(sheetLastDate(mine))}</b> gibt es schon, aber mit Unterschieden.</p>
+          <p class="cf-intro"><b>${escapeHtml(conflictTitle(c))}</b> gibt es schon, aber mit Unterschieden.</p>
           <div class="cf-versions">
-            <div><span class="cf-tag app">App</span>geändert ${fmtStamp(mine.updatedAt)} · ${fmtH(sheetTotal(mine))} · ${sentLabel(mine)}</div>
-            <div><span class="cf-tag new">Neu</span>${escapeHtml(c.stampLabel)} ${fmtStamp(c.stamp)} · ${fmtH(sheetTotal(theirs))}${c.backup ? ` · ${sentLabel(theirs)}` : ''}<br><span class="muted">aus ${escapeHtml(c.file)}</span></div>
+            <div><span class="cf-tag app">App</span>geändert ${fmtStamp(mine.updatedAt)} · ${sum(mine)} · ${sentLabel(mine)}</div>
+            <div><span class="cf-tag new">Neu</span>${escapeHtml(c.stampLabel)} ${fmtStamp(c.stamp)} · ${sum(theirs)}${c.backup ? ` · ${sentLabel(theirs)}` : ''}<br><span class="muted">aus ${escapeHtml(c.file)}</span></div>
           </div>
           <ul class="cf-diff">${diff}</ul>
         </div>
