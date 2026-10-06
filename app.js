@@ -2027,12 +2027,10 @@ function weekPicker(initial, excludeId, onPick, forTrip = false) {
   else for (const sh of sheets) if (sh.id !== excludeId) mark(parseDate(sh.weekStart), !!sh.sentAt);
   const what = forTrip ? 'Abrechnung' : 'Zettel';
 
-  /** Ein Monat als Raster: Kopfzeile, KW-Spalte, Tage */
+  /** Ein Monat als Raster: Kopfzeile, KW-Spalte, Tage – immer 6 Wochen, damit der Kalender beim Blättern gleich hoch bleibt */
   function gridHTML(m) {
     const preview = newSheet(selected, '');
-    const weeks = [];
-    const next = new Date(m.getFullYear(), m.getMonth() + 1, 1);
-    for (let w = mondayOf(m); w < next; w = addDays(w, 7)) weeks.push(w);
+    const weeks = [0, 1, 2, 3, 4, 5].map((k) => addDays(mondayOf(m), 7 * k));
     const today = new Date();
     return `<div class="wp-grid">
         <div class="wp-h">KW</div>${WEEKDAYS_SHORT.map((d) => `<div class="wp-h">${d}</div>`).join('')}
@@ -2096,8 +2094,6 @@ function weekPicker(initial, excludeId, onPick, forTrip = false) {
       }`;
     viewport = wp.querySelector('.wp-viewport');
     strip = wp.querySelector('.wp-strip');
-    // Höhe nach dem sichtbaren Monat (5 oder 6 Wochen), nicht nach dem höchsten Nachbarmonat
-    viewport.style.height = `${strip.children[1].offsetHeight}px`;
   }
   /** Feiertage der gewählten Woche: „Feiertag: Fr 03.10. Tag der Deutschen Einheit“ */
   function holidaysLine() {
@@ -2116,7 +2112,6 @@ function weekPicker(initial, excludeId, onPick, forTrip = false) {
     animating = true;
     strip.style.transition = 'transform 0.28s cubic-bezier(0.25, 0.8, 0.3, 1)';
     strip.style.transform = `translateX(${POS[dir]})`;
-    if (dir) viewport.style.height = `${strip.children[1 + dir].offsetHeight}px`;
     setTimeout(() => {
       animating = false;
       if (dir) {
