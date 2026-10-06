@@ -160,6 +160,30 @@ input { font: inherit; color: inherit; }
   background: var(--card);
 }
 .list-row:active { background: var(--fill); }
+/* Lücke: fehlende Woche(n) zwischen den Zetteln */
+.list-gap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 9px 12px 9px 14px;
+  text-align: left;
+  color: var(--warning);
+  background: repeating-linear-gradient(-45deg, transparent 0 7px, color-mix(in srgb, var(--warning) 9%, transparent) 7px 14px);
+}
+.list-gap:active { background-color: var(--fill); }
+.list-gap .list-title { font-weight: 600; }
+.list-gap .list-sub { color: var(--muted); }
+.gap-icon {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1.5px dashed var(--warning);
+}
+.gap-icon svg { width: 14px; height: 14px; }
 .swipe-del {
   flex: 0 0 92px;
   background: var(--danger);

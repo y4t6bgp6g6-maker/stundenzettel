@@ -487,30 +487,90 @@ function renderList() {
     }`;
 }
 
+/**
+ * Fehlende Zettel: Wochen bzw. Teilwochen (am Monatswechsel) mit Werktagen, für die es keinen Zettel gibt –
+ * vom ersten Zettel bis zum letzten Zettel bzw. bis zur aktuellen Woche (die zählt noch nicht).
+ * Teilwochen, deren Werktage alle Feiertage sind, fehlen nicht. Ergebnis: Zettel-Vorlagen (nicht gespeichert).
+ */
+function missingSheets() {
+  if (!sheets.length) return [];
+  const have = new Set(sheets.map((s) => `${s.weekStart}|${s.year}|${s.month}`));
+  let first = sheetFirstDate(sheets[0]);
+  let last = sheetLastDate(sheets[0]);
+  for (const s of sheets) {
+    if (sheetFirstDate(s) < first) first = sheetFirstDate(s);
+    if (sheetLastDate(s) > last) last = sheetLastDate(s);
+  }
+  const thisWeek = mondayOf(new Date());
+  const end = last > thisWeek ? last : thisWeek;
+  const seen = new Set();
+  const out = [];
+  for (let d = startOfDay(first); d < end; d = addDays(d, 1)) {
+    if ((d.getDay() + 6) % 7 > 4) continue;
+    const n = newSheet(d, '');
+    const key = `${n.weekStart}|${n.year}|${n.month}`;
+    if (have.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    const workdays = sheetActiveDays(n).filter((i) => i < 5 && sheetDate(n, i) < end);
+    if (workdays.length && workdays.every((i) => holidayName(sheetDate(n, i)))) continue;
+    out.push(n);
+  }
+  return out;
+}
+
+/** Zeile für eine Lücke (eine oder mehrere fehlende Wochen hintereinander, neueste zuerst) */
+function gapRowHTML(gap) {
+  const newest = gap[0];
+  const oldest = gap.at(-1);
+  const partial = (n) => sheetActiveDays(n).length < 7;
+  const kw = (n) => isoWeek(parseDate(n.weekStart));
+  const title =
+    gap.length === 1
+      ? `KW ${kw(newest)} fehlt${partial(newest) ? ' (Teilwoche)' : ''}`
+      : `KW ${kw(oldest)}–${kw(newest)} fehlen`;
+  return `<button class="list-gap" data-act="gap" data-date="${isoDate(sheetFirstDate(oldest))}" data-count="${gap.length}">
+    <span class="gap-icon">${ICON.plus}</span>
+    <span class="list-main">
+      <span class="list-title">${title}</span>
+      <span class="list-sub">${fmtShort(sheetFirstDate(oldest))} – ${fmtShort(sheetLastDate(newest))}</span>
+    </span>
+  </button>`;
+}
+
 function listBodyHTML() {
   const searching = searchQuery != null;
   const query = searching ? parseQuery(searchQuery) : null;
   const groups = new Map();
   const hits = new Map();
+  const group = (key) => {
+    if (!groups.has(key)) groups.set(key, []);
+    return groups.get(key);
+  };
   for (const s of sheets) {
     if (query) {
       const hit = searchSheet(s, query);
       if (!hit) continue;
       hits.set(s.id, hit);
     }
-    const key = s.year * 100 + s.month;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(s);
+    group(s.year * 100 + s.month).push(s);
   }
+  // Lücken nur in der normalen Liste, nicht in der Suche
+  if (!searching) for (const n of missingSheets()) group(n.year * 100 + n.month).push({ ...n, missing: true });
   const keys = [...groups.keys()].sort((a, b) => b - a);
 
   if (keys.length) {
     return keys
       .map((k) => {
         const list = groups.get(k).sort((a, b) => sheetFirstDate(b) - sheetFirstDate(a));
-        const monthTotal = list.reduce((t, sh) => t + sheetTotal(sh), 0);
+        const monthTotal = list.filter((sh) => !sh.missing).reduce((t, sh) => t + sheetTotal(sh), 0);
+        // aufeinanderfolgende fehlende Wochen zu einer Zeile zusammenfassen
+        const rows = [];
+        for (const sh of list) {
+          if (sh.missing && Array.isArray(rows.at(-1))) rows.at(-1).push(sh);
+          else rows.push(sh.missing ? [sh] : sh);
+        }
         return `<h2 class="section-title month-head" id="m-${k}"><span>${MONTHS[(k % 100) - 1]} ${Math.floor(k / 100)}</span>${searching ? '' : `<span class="month-total">Gesamt ${fmtH(monthTotal)}</span>`}</h2>
-        <div class="card list">${list.map((sh) => listRowHTML(sh, hits.get(sh.id))).join('')}</div>`;
+        <div class="card list">${rows.map((r) => (Array.isArray(r) ? gapRowHTML(r) : listRowHTML(r, hits.get(r.id)))).join('')}</div>`;
       })
       .join('');
   }
@@ -2369,6 +2429,13 @@ document.addEventListener('click', (e) => {
         location.hash = `#/zettel/${encodeURIComponent(openOrCreate(anchor))}`;
       });
       break;
+    case 'gap': {
+      // Eine fehlende Woche: gleich anlegen; mehrere: Wochenauswahl bei der ersten
+      const date = parseDate(el.dataset.date);
+      if (el.dataset.count === '1') location.hash = `#/zettel/${encodeURIComponent(openOrCreate(date))}`;
+      else weekPicker(date, null, (anchor) => (location.hash = `#/zettel/${encodeURIComponent(openOrCreate(anchor))}`));
+      break;
+    }
     case 'delete':
       clearTimeout(swipeTimer); // offen lassen, solange die Rückfrage angezeigt wird
       askDelete(el.dataset.id, false, closeSwipe);
