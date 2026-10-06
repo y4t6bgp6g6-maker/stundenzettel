@@ -1957,7 +1957,17 @@ function weekPicker(initial, excludeId, onPick, forTrip = false) {
   const modal = openModal(`${modalHead('Woche wählen', 'Übernehmen')}<div class="wp"></div>`, 'sheet');
   const wp = modal.querySelector('.wp');
 
-  function draw() {
+  // Wochen, für die es schon einen Zettel bzw. eine Abrechnung gibt: Montag → 'sent' oder 'open' (offen hat Vorrang)
+  const known = new Map();
+  const mark = (monday, sent) => {
+    const k = isoDate(mondayOf(monday));
+    known.set(k, known.get(k) === 'open' || !sent ? 'open' : 'sent');
+  };
+  if (forTrip) for (const t of trips) for (const d of new Set([t.from, ...t.dates])) mark(parseDate(d), !!t.sentAt);
+  else for (const sh of sheets) if (sh.id !== excludeId) mark(parseDate(sh.weekStart), !!sh.sentAt);
+  const what = forTrip ? 'Abrechnung' : 'Zettel';
+
+  function draw(slide) {
     const preview = newSheet(selected, '');
     const weeks = [];
     const next = new Date(month.getFullYear(), month.getMonth() + 1, 1);
@@ -1976,7 +1986,7 @@ function weekPicker(initial, excludeId, onPick, forTrip = false) {
         ${weeks
           .map((w) => {
             const inWeek = isoDate(w) === preview.weekStart;
-            return `<div class="wp-kw">${isoWeek(w)}</div>${[0, 1, 2, 3, 4, 5, 6]
+            return `<div class="wp-kw ${known.get(isoDate(w)) || ''}"><span>${isoWeek(w)}</span></div>${[0, 1, 2, 3, 4, 5, 6]
               .map((i) => {
                 const d = addDays(w, i);
                 const cls = [
@@ -1986,33 +1996,71 @@ function weekPicker(initial, excludeId, onPick, forTrip = false) {
                   inWeek && (forTrip || (d.getMonth() + 1 === preview.month && d.getFullYear() === preview.year)) ? 'in-sheet' : '',
                   sameDay(d, selected) ? 'sel' : '',
                   sameDay(d, today) ? 'today' : '',
+                  holidayName(d) ? 'holiday' : '',
                 ].join(' ');
-                return `<button class="${cls}" data-date="${isoDate(d)}">${d.getDate()}</button>`;
+                return `<button class="${cls}" data-date="${isoDate(d)}"><span class="wp-num">${d.getDate()}</span></button>`;
               })
               .join('')}`;
           })
           .join('')}
+      </div>
+      <div class="wp-legend">
+        <span><i class="lg-kw sent"></i>${what} gesendet</span>
+        <span><i class="lg-kw open"></i>${what} offen</span>
+        <span><i class="lg-today"></i>Heute</span>
+        <span><i class="lg-hol"></i>Feiertag</span>
       </div>
       ${
         forTrip
           ? `<div class="wp-preview">
         <b>Woche ${fmtShort(mondayOf(selected))} – ${fmtShort(addDays(mondayOf(selected), 6))}</b>
         <span class="muted">Danach tippst du die Reisetage an.</span>
+        ${holidaysLine()}
       </div>`
           : `<div class="wp-preview">
         <b>${sheetTitle(preview)}</b>
         <span class="muted">${exists ? (excludeId ? 'Für diese Woche gibt es schon einen Zettel' : 'Gibt es schon – wird geöffnet') : 'Ausgegraute Tage gehören zum anderen Monat'}</span>
+        ${holidaysLine()}
       </div>`
       }`;
+    if (slide) wp.querySelector('.wp-grid').classList.add(slide);
   }
+  /** Feiertage der gewählten Woche: „Feiertag: Fr 03.10. Tag der Deutschen Einheit“ */
+  function holidaysLine() {
+    const monday = mondayOf(selected);
+    const list = [0, 1, 2, 3, 4, 5, 6]
+      .map((i) => addDays(monday, i))
+      .filter((d) => holidayName(d))
+      .map((d) => `${WEEKDAYS_SHORT[(d.getDay() + 6) % 7]} ${fmtDayMonth(d)} ${escapeHtml(holidayName(d))}`);
+    return list.length ? `<span class="wp-hol-line">Feiertag: ${list.join(', ')}</span>` : '';
+  }
+  const shiftMonth = (dir) => {
+    month = new Date(month.getFullYear(), month.getMonth() + dir, 1);
+    draw(dir > 0 ? 'slide-next' : 'slide-prev');
+  };
   draw();
+
+  // Wischen nach links/rechts blättert den Monat um
+  let swipe = null;
+  wp.addEventListener('touchstart', (e) => (swipe = e.touches.length === 1 ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null), { passive: true });
+  wp.addEventListener(
+    'touchend',
+    (e) => {
+      if (!swipe) return;
+      const dx = e.changedTouches[0].clientX - swipe.x;
+      const dy = e.changedTouches[0].clientY - swipe.y;
+      swipe = null;
+      if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy) * 1.5) shiftMonth(dx < 0 ? 1 : -1);
+    },
+    { passive: true }
+  );
 
   modal.addEventListener('click', (e) => {
     const t = e.target.closest('[data-wp],[data-date],[data-m]');
     if (!t) return;
-    if (t.dataset.wp === 'prev') month = new Date(month.getFullYear(), month.getMonth() - 1, 1);
-    else if (t.dataset.wp === 'next') month = new Date(month.getFullYear(), month.getMonth() + 1, 1);
-    else if (t.dataset.date) selected = parseDate(t.dataset.date);
+    if (t.dataset.wp === 'prev') return shiftMonth(-1);
+    if (t.dataset.wp === 'next') return shiftMonth(1);
+    if (t.dataset.date) selected = parseDate(t.dataset.date);
     else if (t.dataset.m === 'cancel') return closeModal();
     else if (t.dataset.m === 'ok') {
       closeModal();

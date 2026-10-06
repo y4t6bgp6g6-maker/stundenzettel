@@ -514,7 +514,7 @@ input { font: inherit; color: inherit; }
   content: '';
   position: absolute;
   left: 50%;
-  bottom: 5px;
+  bottom: 1px;
   width: 5px;
   height: 5px;
   margin-left: -2.5px;
@@ -522,6 +522,40 @@ input { font: inherit; color: inherit; }
   background: currentColor;
 }
 .wp-day.today:not(.in-sheet) { color: var(--accent); font-weight: 700; }
+.wp-num { display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; }
+/* Heute: immer ein Ring, auch in der gewählten Woche */
+.wp-day.today .wp-num { box-shadow: inset 0 0 0 2px currentColor; font-weight: 700; }
+/* Gesetzliche Feiertage: lila Zahl und Punkt oben rechts */
+.wp-day.holiday:not(.in-sheet) { color: #af52de; }
+.wp-day.holiday::before {
+  content: '';
+  position: absolute;
+  top: 5px;
+  right: calc(50% - 17px);
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #af52de;
+  box-shadow: 0 0 0 1.5px var(--sheet);
+}
+/* Wochen mit vorhandenem Zettel bzw. Abrechnung: KW grün (gesendet) oder orange (offen) */
+.wp-kw span { display: inline-grid; place-items: center; min-width: 26px; height: 22px; padding: 0 3px; border-radius: 7px; }
+.wp-kw.sent span { background: var(--success); color: #fff; font-weight: 600; }
+.wp-kw.open span { background: var(--warning); color: #fff; font-weight: 600; }
+.wp-legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 10px; padding: 12px 0 0; font-size: 12px; color: var(--muted); }
+.wp-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.wp-legend i { display: inline-block; flex: none; }
+.lg-kw { width: 14px; height: 10px; border-radius: 3px; }
+.lg-kw.sent { background: var(--success); }
+.lg-kw.open { background: var(--warning); }
+.lg-today { width: 11px; height: 11px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--accent); }
+.lg-hol { width: 7px; height: 7px; border-radius: 50%; background: #af52de; }
+.wp-hol-line { font-size: 13px; color: #af52de; }
+/* Monat umblättern */
+.wp-grid.slide-next { animation: wp-in-next 0.22s ease-out; }
+.wp-grid.slide-prev { animation: wp-in-prev 0.22s ease-out; }
+@keyframes wp-in-next { from { transform: translateX(28px); opacity: 0.2; } }
+@keyframes wp-in-prev { from { transform: translateX(-28px); opacity: 0.2; } }
 .wp-preview { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 14px 0 6px; text-align: center; }
 .wp-preview .muted { font-size: 13px; }
 
