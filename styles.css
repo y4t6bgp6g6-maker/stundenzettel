@@ -957,3 +957,16 @@ button.nav-title { font-size: 17px; }
 .field-icon-inline { display: flex; color: var(--muted); flex: none; }
 .chip { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 .alert-buttons.single { grid-template-columns: 1fr; }
+/* Rückfrage bei doppelten Zetteln */
+.modal.alert.wide { width: min(380px, calc(100% - 32px)); }
+.alert-buttons.stacked { grid-template-columns: 1fr; }
+.alert-buttons.stacked button + button { border-left: 0; border-top: 0.5px solid var(--sep); }
+.cf .alert-msg { text-align: left; max-height: 52vh; }
+.cf-intro { font-size: 14px; margin: 0 0 10px; text-align: center; }
+.cf-versions { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: 10px; background: var(--fill); }
+.cf-tag { display: inline-block; min-width: 34px; margin-right: 6px; padding: 1px 6px; border-radius: 6px; font-size: 11px; font-weight: 700; text-align: center; color: #fff; }
+.cf-tag.app { background: var(--muted); }
+.cf-tag.new { background: var(--accent); }
+.cf-diff { list-style: none; margin: 10px 0 0; padding: 0; }
+.cf-diff li { padding: 7px 0; border-top: 0.5px solid var(--sep); }
+.cf-line { display: block; margin-top: 3px; }

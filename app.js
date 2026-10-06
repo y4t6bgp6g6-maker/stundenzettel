@@ -1796,39 +1796,54 @@ function exportBackup() {
   }
 }
 
-/** Sicherung (JSON) übernehmen; Ergebnis: { added, updated, skipped } */
+/** Inhalt eines Tages zum Vergleichen und Anzeigen: „07:00–16:00 Ort · Arbeit; Pause 0,50 h“ bzw. „Urlaub“ */
+function dayText(d) {
+  const rows = d.rows
+    .filter((r) => !rowIsEmpty(r))
+    .map((r) => {
+      const time = r.start != null || r.end != null ? `${r.start != null ? fmtTime(r.start) : '?'}–${r.end != null ? fmtTime(r.end) : '?'}` : '';
+      return [time, [(r.site || '').trim(), (r.work || '').trim()].filter(Boolean).join(' · ')].filter(Boolean).join(' ');
+    });
+  if (d.status && !canWork(d)) return DAY_STATUS_SHORT[d.status];
+  const parts = [...(d.status ? [DAY_STATUS_SHORT[d.status]] : []), ...rows];
+  if (d.pause) parts.push(`Pause ${fmtH(d.pause)}`);
+  return parts.join('; ') || '–';
+}
+/** Tage, an denen sich zwei Fassungen desselben Zettels unterscheiden: [{ i, mine, theirs }] */
+function sheetDiff(mine, theirs) {
+  return sheetActiveDays(mine)
+    .map((i) => ({ i, mine: dayText(mine.days[i]), theirs: dayText(theirs.days[i] || { rows: [] }) }))
+    .filter((x) => x.mine !== x.theirs);
+}
+const weekKey = (s) => `${s.weekStart}|${s.year}|${s.month}`;
+/** „12.10.26, 14:03“ */
+const fmtStamp = (ms) => (ms ? `${fmtShort(new Date(ms))}, ${fmtTime(new Date(ms).getHours() * 60 + new Date(ms).getMinutes())}` : 'unbekannt');
+
+/**
+ * Sicherung (JSON) übernehmen. Neue Zettel kommen dazu; gibt es die Woche (oder die ID) schon, wird verglichen:
+ * gleich → nichts, verschieden → Rückfrage (conflicts, wird in importBackup entschieden).
+ */
 function mergeBackup(data) {
   const incoming = Array.isArray(data) ? data : data.sheets;
   if (!Array.isArray(incoming) || !incoming.every((s) => s && s.id && s.weekStart && Array.isArray(s.days))) throw new Error('format');
-  // Gleicher Zettel (ID): die zuletzt geänderte Fassung gewinnt, ohne Zeitstempel bleibt die in der App.
-  // Eine Woche, die es in der App schon als anderen Zettel gibt, bleibt unverändert.
-  const weekKey = (s) => `${s.weekStart}|${s.year}|${s.month}`;
-  const byId = new Map(sheets.map((s) => [s.id, s]));
-  const weeks = new Map(sheets.map((s) => [weekKey(s), s.id]));
   let added = 0;
-  let updated = 0;
-  let skipped = 0;
+  let same = 0;
+  const conflicts = [];
   const myName = settings.name.trim();
   let renamed = 0;
   for (const s of incoming) {
-    const owner = weeks.get(weekKey(s));
-    const current = byId.get(s.id);
-    if ((owner && owner !== s.id) || (current && !((s.updatedAt || 0) > (current.updatedAt || 0)))) {
-      skipped++;
-      continue;
-    }
     // Eigener Name aus den Einstellungen statt des Namens in der Sicherung
     if (myName && s.name !== myName) {
       s.name = myName;
       renamed++;
     }
-    if (current) weeks.delete(weekKey(current));
-    byId.set(s.id, s);
-    weeks.set(weekKey(s), s.id);
-    if (current) updated++;
-    else added++;
+    const current = sheets.find((x) => x.id === s.id) || sheets.find((x) => weekKey(x) === weekKey(s));
+    if (!current) {
+      sheets.push(s);
+      added++;
+    } else if (sheetDiff(current, s).length) conflicts.push({ existing: current, incoming: s, stamp: s.updatedAt, stampLabel: 'geändert', backup: true });
+    else same++;
   }
-  sheets = [...byId.values()];
   saveSheets();
   // Unterschrift aus der Sicherung nur, wenn auf diesem Gerät noch keine gesetzt ist
   let signature = false;
@@ -1848,7 +1863,7 @@ function mergeBackup(data) {
     trips = [...tripById.values()];
     saveTrips();
   }
-  return { added, updated, skipped, signature, renamed };
+  return { added, same, conflicts, signature, renamed };
 }
 
 /** Eine oder mehrere Dateien einlesen: Sicherung (.json), Stundenzettel als Numbers-Datei oder PDF */
@@ -1876,6 +1891,7 @@ async function importBackup(input) {
   input.value = '';
   if (!files.length) return;
   const lines = [];
+  const conflicts = [];
   let total = 0;
   toast(files.length > 1 ? `${files.length} Dateien werden eingelesen …` : 'Wird eingelesen …', 10000);
   for (const file of files) {
@@ -1885,10 +1901,11 @@ async function importBackup(input) {
       const head = new Uint8Array(buf.slice(0, 1))[0];
       if (/\.json$/i.test(file.name) || head === 0x7b || head === 0x5b) {
         const r = mergeBackup(JSON.parse(new TextDecoder().decode(buf)));
-        total += r.added + r.updated;
+        total += r.added;
+        r.conflicts.forEach((c) => conflicts.push({ ...c, file: file.name }));
         const parts = [`${r.added} Stundenzettel neu`];
-        if (r.updated) parts.push(`${r.updated} aktualisiert`);
-        if (r.skipped) parts.push(`${r.skipped} übersprungen`);
+        if (r.same) parts.push(`${r.same} schon vorhanden (gleich)`);
+        if (r.conflicts.length) parts.push(`${r.conflicts.length} mit Unterschieden`);
         if (r.signature) parts.push('Unterschrift übernommen');
         if (r.renamed) parts.push(`Name bei ${r.renamed} auf „${escapeHtml(settings.name.trim())}“ geändert`);
         lines.push(`${label}: ${parts.join(', ')}`);
@@ -1896,13 +1913,18 @@ async function importBackup(input) {
       }
       const s = await importTimesheetFile(file.name, buf);
       const existing = existingSheet(sheetFirstDate(s));
+      const other = s.importedName && s.importedName.trim() !== s.name;
+      delete s.importedName;
       if (existing) {
-        lines.push(`${label}: übersprungen – für ${fmtShort(sheetFirstDate(s))} – ${fmtShort(sheetLastDate(s))} gibt es schon einen Zettel`);
+        const range = `${fmtShort(sheetFirstDate(s))} – ${fmtShort(sheetLastDate(s))}`;
+        if (!sheetDiff(existing, s).length) lines.push(`${label}: ${range} schon vorhanden (gleich)`);
+        else {
+          conflicts.push({ existing, incoming: s, stamp: file.lastModified, stampLabel: 'Datei vom', file: file.name });
+          lines.push(`${label}: ${range} schon vorhanden, mit Unterschieden`);
+        }
         continue;
       }
       s.sentAt = Date.now(); // eingelesene Zettel gelten als schon gesendet
-      const other = s.importedName && s.importedName.trim() !== s.name;
-      delete s.importedName;
       sheets.push(s);
       saveSheets(s);
       total++;
@@ -1914,9 +1936,84 @@ async function importBackup(input) {
     }
   }
   document.getElementById('toast').classList.remove('show');
+  // Zettel mit Unterschieden: selbst entscheiden (einzeln, oder alle ersetzen / alle überspringen)
+  let all = null;
+  for (let k = 0; k < conflicts.length; k++) {
+    const c = conflicts[k];
+    const choice = all || (await askConflict(c, conflicts.length - k));
+    if (choice === 'replaceAll' || choice === 'keepAll') all = choice;
+    const replace = choice === 'replace' || choice === 'replaceAll';
+    const range = `${fmtShort(sheetFirstDate(c.existing))} – ${fmtShort(sheetLastDate(c.existing))}`;
+    if (replace) {
+      replaceSheet(c);
+      total++;
+    }
+    lines.push(`<b>${range}</b>: ${replace ? 'durch die neue Fassung ersetzt' : 'Fassung in der App behalten'}`);
+  }
+  if (conflicts.length) saveSheets();
   if (currentView === 'settings') renderSettings();
   if (currentView === 'list') renderList();
   infoDialog(total ? `${total} Stundenzettel eingelesen` : 'Nichts eingelesen', `<ul class="problem-list">${lines.map((l) => `<li>${l}</li>`).join('')}</ul>`);
+}
+
+/** Neue Fassung übernehmen; der Zettel behält seine ID (Verknüpfung zu Reisekosten), aus Dateien auch den Status */
+function replaceSheet(c) {
+  const { existing, incoming } = c;
+  if (c.backup) {
+    Object.assign(existing, { ...incoming, id: existing.id });
+  } else {
+    existing.days = incoming.days;
+    existing.name = incoming.name;
+  }
+  existing.updatedAt = Date.now();
+}
+
+/** Rückfrage bei einem doppelten Zettel mit Unterschieden; Ergebnis: 'keep' | 'replace' | 'keepAll' | 'replaceAll' */
+function askConflict(c, remaining) {
+  return new Promise((resolve) => {
+    const { existing: mine, incoming: theirs } = c;
+    const sentLabel = (s) => (s.sentAt ? 'gesendet' : 'offen');
+    const diff = sheetDiff(mine, theirs)
+      .map(
+        (d) => `<li><b>${WEEKDAYS_SHORT[d.i]} ${fmtDayMonth(sheetDate(mine, d.i))}</b>
+          <span class="cf-line"><span class="cf-tag app">App</span>${escapeHtml(d.mine)}</span>
+          <span class="cf-line"><span class="cf-tag new">Neu</span>${escapeHtml(d.theirs)}</span></li>`
+      )
+      .join('');
+    const modal = openModal(
+      `<div class="alert-body cf">
+        <b>Stundenzettel doppelt</b>
+        <div class="alert-msg">
+          <p class="cf-intro"><b>${fmtShort(sheetFirstDate(mine))} – ${fmtShort(sheetLastDate(mine))}</b> gibt es schon, aber mit Unterschieden.</p>
+          <div class="cf-versions">
+            <div><span class="cf-tag app">App</span>geändert ${fmtStamp(mine.updatedAt)} · ${fmtH(sheetTotal(mine))} · ${sentLabel(mine)}</div>
+            <div><span class="cf-tag new">Neu</span>${escapeHtml(c.stampLabel)} ${fmtStamp(c.stamp)} · ${fmtH(sheetTotal(theirs))}${c.backup ? ` · ${sentLabel(theirs)}` : ''}<br><span class="muted">aus ${escapeHtml(c.file)}</span></div>
+          </div>
+          <ul class="cf-diff">${diff}</ul>
+        </div>
+      </div>
+      <div class="alert-buttons stacked">
+        <button data-c="replace">Neue Fassung übernehmen</button>
+        <button data-c="keep" class="strong">Fassung in der App behalten</button>
+        ${remaining > 1 ? `<button data-c="replaceAll">Alle ${remaining} ersetzen</button><button data-c="keepAll">Alle ${remaining} überspringen</button>` : ''}
+      </div>`,
+      'alert wide'
+    );
+    let done = false;
+    const finish = (v) => {
+      if (done) return;
+      done = true;
+      closeModal();
+      // Nächste Rückfrage erst, wenn diese ganz geschlossen ist
+      setTimeout(() => resolve(v), 280);
+    };
+    modal.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-c]');
+      if (b) finish(b.dataset.c);
+    });
+    // Antippen neben das Fenster: Fassung in der App behalten
+    layer.querySelector('.backdrop').addEventListener('click', () => finish('keep'));
+  });
 }
 
 function infoDialog(title, message) {
