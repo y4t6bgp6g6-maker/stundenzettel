@@ -2096,6 +2096,23 @@ function openModal(html, className = '') {
   return layer.querySelector('.modal');
 }
 
+/** Bei offenem Fenster scrollt nichts im Hintergrund: Ziehen zählt nur in Bereichen des Fensters, die selbst scrollen
+ *  (Uhrzeit-Räder, lange Hinweise). Eigene Gesten wie das Monats-Ziehen im Kalender laufen weiter über ihre Touch-Ereignisse. */
+function scrollableIn(el) {
+  for (; el && el !== layer; el = el.parentElement) {
+    const oy = getComputedStyle(el).overflowY;
+    if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight + 1) return el;
+  }
+  return null;
+}
+layer.addEventListener(
+  'touchmove',
+  (e) => {
+    if (!scrollableIn(e.target)) e.preventDefault();
+  },
+  { passive: false }
+);
+
 function closeModal(immediate = false) {
   const gen = ++modalGen;
   layer.classList.remove('show');
