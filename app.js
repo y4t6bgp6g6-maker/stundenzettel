@@ -1019,7 +1019,7 @@ function sendWithCheck(s) {
   );
 }
 
-function askDelete(id, leave) {
+function askDelete(id, leave, onCancel = null) {
   const s = findSheet(id);
   if (!s) return;
   confirmDialog('Stundenzettel löschen?', `${sheetTitle(s)} wird endgültig gelöscht.`, 'Löschen', () => {
@@ -1027,7 +1027,7 @@ function askDelete(id, leave) {
     saveSheets();
     if (leave) goBack();
     else renderList();
-  }, true);
+  }, true, 'Abbrechen', onCancel);
 }
 
 // ───────────────────────── PDF & Senden ─────────────────────────
@@ -1320,13 +1320,13 @@ function newTripFromList() {
   }, true);
 }
 
-function askDeleteTrip(t, leave) {
+function askDeleteTrip(t, leave, onCancel = null) {
   confirmDialog('Abrechnung löschen?', `${escapeHtml(tripTitle(t))} wird endgültig gelöscht.`, 'Löschen', () => {
     trips = trips.filter((x) => x !== t);
     saveTrips();
     if (leave) goBack();
     else renderTripList();
-  }, true);
+  }, true, 'Abbrechen', onCancel);
 }
 
 function renderTrip(id) {
@@ -2089,7 +2089,7 @@ function actionSheet(actions) {
   });
 }
 
-function confirmDialog(title, message, okLabel, onOk, destructive = false, cancelLabel = 'Abbrechen') {
+function confirmDialog(title, message, okLabel, onOk, destructive = false, cancelLabel = 'Abbrechen', onCancel = null) {
   const modal = openModal(
     `<div class="alert-body"><b>${title}</b><div class="alert-msg">${message}</div></div>
     <div class="alert-buttons">
@@ -2103,7 +2103,10 @@ function confirmDialog(title, message, okLabel, onOk, destructive = false, cance
     if (!b) return;
     closeModal();
     if (b.dataset.c === 'yes') onOk();
+    else if (onCancel) onCancel();
   });
+  // Antippen neben das Fenster zählt wie Abbrechen
+  if (onCancel) layer.querySelector('.backdrop').addEventListener('click', onCancel);
 }
 
 let toastTimer = 0;
@@ -2367,7 +2370,8 @@ document.addEventListener('click', (e) => {
       });
       break;
     case 'delete':
-      askDelete(el.dataset.id, false);
+      clearTimeout(swipeTimer); // offen lassen, solange die Rückfrage angezeigt wird
+      askDelete(el.dataset.id, false, closeSwipe);
       break;
     case 'back':
       goBack();
@@ -2437,7 +2441,8 @@ document.addEventListener('click', (e) => {
       break;
     case 'trip-delete': {
       const t = findTrip(el.dataset.id);
-      if (t) askDeleteTrip(t, false);
+      clearTimeout(swipeTimer);
+      if (t) askDeleteTrip(t, false, closeSwipe);
       break;
     }
     case 'trip-toggle':
@@ -2566,6 +2571,97 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
   }
 });
+
+// ───────────────────────── Wischen zum Löschen ─────────────────────────
+// Eintrag in der Liste nach links ziehen: erst bei deutlich waagerechter Bewegung, „Löschen“ bleibt erst ab 70 px stehen.
+// Die Option schließt nach 3 Sekunden, beim Berühren einer anderen Stelle und nach „Abbrechen“ in der Rückfrage.
+
+const SWIPE_W = 92;
+const SWIPE_OPEN = 70;
+let swipeOpen = null;
+let swipeTimer = 0;
+let swipeDrag = null;
+let swipeDraggedAt = 0;
+
+function closeSwipe() {
+  clearTimeout(swipeTimer);
+  if (swipeOpen) swipeOpen.querySelector('.swipe-track').style.transform = '';
+  swipeOpen = null;
+}
+function openSwipe(el) {
+  if (swipeOpen && swipeOpen !== el) closeSwipe();
+  swipeOpen = el;
+  el.querySelector('.swipe-track').style.transform = `translateX(${-SWIPE_W}px)`;
+  clearTimeout(swipeTimer);
+  swipeTimer = setTimeout(closeSwipe, 3000);
+}
+document.addEventListener(
+  'touchstart',
+  (e) => {
+    const el = e.target.closest('.swipe');
+    if (swipeOpen && el !== swipeOpen) closeSwipe();
+    swipeDrag =
+      el && e.touches.length === 1 && !e.target.closest('.swipe-del')
+        ? { el, x: e.touches[0].clientX, y: e.touches[0].clientY, base: el === swipeOpen ? -SWIPE_W : 0, active: false, dead: false, pos: 0 }
+        : null;
+  },
+  { passive: true }
+);
+document.addEventListener(
+  'touchmove',
+  (e) => {
+    const d = swipeDrag;
+    if (!d || d.dead) return;
+    const dx = e.touches[0].clientX - d.x;
+    const dy = e.touches[0].clientY - d.y;
+    if (!d.active) {
+      // Senkrecht: normales Scrollen, die Zeile bleibt stehen
+      if (Math.abs(dy) > 8 && Math.abs(dy) * 1.2 >= Math.abs(dx)) {
+        d.dead = true;
+        return;
+      }
+      if (Math.abs(dx) < 18 || Math.abs(dx) < Math.abs(dy) * 2) return;
+      d.active = true;
+      d.x = e.touches[0].clientX; // ab hier folgt die Zeile dem Finger, ohne Sprung
+      clearTimeout(swipeTimer);
+      d.track = d.el.querySelector('.swipe-track');
+      d.track.classList.add('dragging');
+      return;
+    }
+    d.pos = Math.max(-SWIPE_W - 24, Math.min(0, d.base + dx));
+    d.track.style.transform = `translateX(${d.pos}px)`;
+  },
+  { passive: true }
+);
+const endSwipe = () => {
+  const d = swipeDrag;
+  swipeDrag = null;
+  if (!d || !d.active) return;
+  swipeDraggedAt = Date.now();
+  d.track.classList.remove('dragging');
+  if (d.pos <= -SWIPE_OPEN) openSwipe(d.el);
+  else {
+    if (swipeOpen === d.el) swipeOpen = null;
+    clearTimeout(swipeTimer);
+    d.track.style.transform = '';
+  }
+};
+document.addEventListener('touchend', endSwipe, { passive: true });
+document.addEventListener('touchcancel', endSwipe, { passive: true });
+// Nach dem Ziehen nicht den Zettel öffnen; bei offener Option schließt ein Tipp auf den Eintrag sie nur
+document.addEventListener(
+  'click',
+  (e) => {
+    const sw = e.target.closest('.swipe');
+    if (!sw || e.target.closest('.swipe-del')) return;
+    if (Date.now() - swipeDraggedAt < 400 || sw === swipeOpen) {
+      e.preventDefault();
+      e.stopPropagation();
+      closeSwipe();
+    }
+  },
+  true
+);
 
 // ───────────────────────── Zeilen verschieben ─────────────────────────
 // Lange auf eine Zeile drücken (nicht in ein Textfeld), dann nach oben oder unten ziehen.

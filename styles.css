@@ -144,13 +144,13 @@ input { font: inherit; color: inherit; }
 
 /* Liste */
 .list > * + * { border-top: 0.5px solid var(--sep); }
-.swipe { overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; }
-.swipe::-webkit-scrollbar { display: none; }
-.swipe-track { display: flex; width: calc(100% + 92px); }
+/* Wischen zum Löschen (Steuerung in app.js): senkrechtes Scrollen bleibt beim Browser */
+.swipe { overflow: hidden; touch-action: pan-y; }
+.swipe-track { display: flex; width: calc(100% + 92px); transition: transform 0.25s ease; }
+.swipe-track.dragging { transition: none; }
 .list-row {
   flex: 0 0 calc(100% - 92px);
   min-width: 0;
-  scroll-snap-align: start;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -162,7 +162,6 @@ input { font: inherit; color: inherit; }
 .list-row:active { background: var(--fill); }
 .swipe-del {
   flex: 0 0 92px;
-  scroll-snap-align: end;
   background: var(--danger);
   color: #fff;
   font-weight: 500;
