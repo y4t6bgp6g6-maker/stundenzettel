@@ -1761,7 +1761,7 @@ function renderSettings() {
     <h2 class="section-title">Datensicherung</h2>
     <div class="card list">
       <button class="list-btn" data-act="backup-export">Sicherung speichern …</button>
-      <label class="list-btn">Sicherung einlesen …<input type="file" multiple accept=".json,.numbers,.pdf,application/json,application/pdf,application/vnd.apple.numbers,application/x-iwork-numbers-sffnumbers" data-act-change="backup-import" hidden></label>
+      <label class="list-btn">Sicherung einlesen …<input type="file" multiple accept="${IMPORT_ACCEPT}" data-act-change="backup-import" hidden></label>
     </div>
     <p class="footnote">Deine Zettel sind nur auf diesem iPhone. Speichere ab und zu eine Sicherung in iCloud Drive. Beim Einlesen geht nichts verloren.</p>
     <p class="footnote">Einlesen geht auch mit Stundenzetteln als Numbers- oder PDF-Datei, auch mehrere auf einmal.</p>
@@ -1845,6 +1845,25 @@ function mergeBackup(data) {
 }
 
 /** Eine oder mehrere Dateien einlesen: Sicherung (.json), Stundenzettel als Numbers-Datei oder PDF */
+/** Dateitypen für „Einlesen“ (nur diese, damit iOS keine Kamera/Fotos anbietet) */
+const IMPORT_ACCEPT =
+  '.json,.numbers,.pdf,application/json,application/pdf,application/vnd.apple.numbers,application/x-iwork-numbers-sffnumbers';
+
+/** Dateiauswahl zum Einlesen öffnen – muss direkt im Antippen laufen, sonst blockiert Safari sie */
+function pickImportFile() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.multiple = true;
+  input.accept = IMPORT_ACCEPT;
+  input.hidden = true;
+  input.addEventListener('change', () => {
+    importBackup(input);
+    input.remove();
+  });
+  document.body.append(input);
+  input.click();
+}
+
 async function importBackup(input) {
   const files = [...(input.files || [])];
   input.value = '';
@@ -1884,6 +1903,7 @@ async function importBackup(input) {
   }
   document.getElementById('toast').classList.remove('show');
   if (currentView === 'settings') renderSettings();
+  if (currentView === 'list') renderList();
   infoDialog(total ? `${total} Stundenzettel eingelesen` : 'Nichts eingelesen', `<ul class="problem-list">${lines.map((l) => `<li>${l}</li>`).join('')}</ul>`);
 }
 
@@ -2484,10 +2504,15 @@ document.addEventListener('click', (e) => {
       });
       break;
     case 'gap': {
-      // Eine fehlende Woche: gleich anlegen; mehrere: Wochenauswahl bei der ersten
+      // Fehlende Woche: einlesen oder neu erstellen (dann immer erst die Wochenauswahl, bei der ersten fehlenden Woche)
       const date = parseDate(el.dataset.date);
-      if (el.dataset.count === '1') location.hash = `#/zettel/${encodeURIComponent(openOrCreate(date))}`;
-      else weekPicker(date, null, (anchor) => (location.hash = `#/zettel/${encodeURIComponent(openOrCreate(anchor))}`));
+      actionSheet([
+        { label: 'Stundenzettel einlesen …', run: pickImportFile },
+        {
+          label: 'Neuen Stundenzettel erstellen',
+          run: () => weekPicker(date, null, (anchor) => (location.hash = `#/zettel/${encodeURIComponent(openOrCreate(anchor))}`)),
+        },
+      ]);
       break;
     }
     case 'delete':
