@@ -262,10 +262,6 @@ function sheetProblems(s) {
       if (endBeforeStart(r)) problems.push(`${where}: Ende ${fmtTime(r.end)} liegt vor Beginn ${fmtTime(r.start)}`);
       if (sameStartEnd(r)) problems.push(`${where}: Beginn und Ende sind gleich (${fmtTime(r.start)})`);
       if (missing.length) problems.push(`${where}: ${missing.join(', ')} ${missing.length > 1 ? 'fehlen' : 'fehlt'}`);
-      for (const f of ['site', 'work']) {
-        const t = typoFor(f, r);
-        if (t) problems.push(`${where}: „${t.part}“ – meintest du „${t.suggestion}“?`);
-      }
       if (r.start != null && r.end != null && r.end > r.start) timed.push(r);
     });
     if (rowsOutOfOrder(d).size) problems.push(`${day}: Zeilen nicht in zeitlicher Reihenfolge`);
