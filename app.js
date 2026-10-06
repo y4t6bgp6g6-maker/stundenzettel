@@ -1734,9 +1734,10 @@ function renderSettings() {
   app.innerHTML = `
     <header class="nav">
       <button class="nav-btn back" data-act="back" aria-label="Zurück">${ICON.back}</button>
-      <span class="nav-title">Einstellungen</span>
+      <span class="nav-title"></span>
       <span class="nav-btn"></span>
     </header>
+    <h1 class="large-title">Einstellungen</h1>
     <h2 class="section-title">Stundenzettel</h2>
     <div class="card form">
       <label class="field"><span>Name</span><input data-s="name" placeholder="Vor- und Nachname" value="${escapeHtml(settings.name)}" autocomplete="name" enterkeyhint="done"></label>
