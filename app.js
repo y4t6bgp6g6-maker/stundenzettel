@@ -1808,12 +1808,19 @@ function mergeBackup(data) {
   let added = 0;
   let updated = 0;
   let skipped = 0;
+  const myName = settings.name.trim();
+  let renamed = 0;
   for (const s of incoming) {
     const owner = weeks.get(weekKey(s));
     const current = byId.get(s.id);
     if ((owner && owner !== s.id) || (current && !((s.updatedAt || 0) > (current.updatedAt || 0)))) {
       skipped++;
       continue;
+    }
+    // Eigener Name aus den Einstellungen statt des Namens in der Sicherung
+    if (myName && s.name !== myName) {
+      s.name = myName;
+      renamed++;
     }
     if (current) weeks.delete(weekKey(current));
     byId.set(s.id, s);
@@ -1836,12 +1843,12 @@ function mergeBackup(data) {
     for (const t of data.trips) {
       if (!t || !t.id || !Array.isArray(t.dates)) continue;
       const cur = tripById.get(t.id);
-      if (!cur || (t.updatedAt || 0) > (cur.updatedAt || 0)) tripById.set(t.id, { over: {}, ...t });
+      if (!cur || (t.updatedAt || 0) > (cur.updatedAt || 0)) tripById.set(t.id, { over: {}, ...t, ...(myName ? { name: myName } : {}) });
     }
     trips = [...tripById.values()];
     saveTrips();
   }
-  return { added, updated, skipped, signature };
+  return { added, updated, skipped, signature, renamed };
 }
 
 /** Eine oder mehrere Dateien einlesen: Sicherung (.json), Stundenzettel als Numbers-Datei oder PDF */
@@ -1883,6 +1890,7 @@ async function importBackup(input) {
         if (r.updated) parts.push(`${r.updated} aktualisiert`);
         if (r.skipped) parts.push(`${r.skipped} übersprungen`);
         if (r.signature) parts.push('Unterschrift übernommen');
+        if (r.renamed) parts.push(`Name bei ${r.renamed} auf „${escapeHtml(settings.name.trim())}“ geändert`);
         lines.push(`${label}: ${parts.join(', ')}`);
         continue;
       }
@@ -1893,10 +1901,14 @@ async function importBackup(input) {
         continue;
       }
       s.sentAt = Date.now(); // eingelesene Zettel gelten als schon gesendet
+      const other = s.importedName && s.importedName.trim() !== s.name;
+      delete s.importedName;
       sheets.push(s);
       saveSheets(s);
       total++;
-      lines.push(`${label}: ${fmtShort(sheetFirstDate(s))} – ${fmtShort(sheetLastDate(s))}, ${fmtH(sheetTotal(s))}`);
+      lines.push(
+        `${label}: ${fmtShort(sheetFirstDate(s))} – ${fmtShort(sheetLastDate(s))}, ${fmtH(sheetTotal(s))}${other ? ` · Name auf „${escapeHtml(s.name)}“ geändert` : ''}`
+      );
     } catch (e) {
       lines.push(`${label}: konnte nicht gelesen werden${e && e.message && e.message !== 'format' ? ` (${escapeHtml(e.message)})` : ''}`);
     }

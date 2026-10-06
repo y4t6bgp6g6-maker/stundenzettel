@@ -852,7 +852,9 @@ const dateFromFileName = (name) => parseDateText(name);
 function parsedToSheet(parsed, fileName) {
   const anchor = parsed.from || dateFromFileName(fileName);
   if (!anchor) throw new Error('Kein Datum („Woche von“) gefunden');
-  const s = newSheet(anchor, parsed.name || settings.name);
+  // Eigener Name aus den Einstellungen hat Vorrang (z. B. beim Einlesen des Zettels eines Kollegen)
+  const s = newSheet(anchor, settings.name.trim() || parsed.name || '');
+  s.importedName = parsed.name || '';
   const seen = new Set();
   for (const d of parsed.days) {
     if (seen.has(d.day)) continue; // doppelte Wochentage: nur der erste zählt
