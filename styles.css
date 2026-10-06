@@ -423,7 +423,8 @@ input { font: inherit; color: inherit; }
   right: 0;
   bottom: 0;
   z-index: 10;
-  padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+  /* Knopf sitzt tief, knapp über dem Home-Balken */
+  padding: 10px 16px max(12px, calc(env(safe-area-inset-bottom) - 8px));
   display: flex;
   justify-content: center;
   pointer-events: none; /* kein Hintergrund: Tippen daneben trifft die Liste */
