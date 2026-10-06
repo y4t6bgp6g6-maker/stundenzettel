@@ -2711,7 +2711,32 @@ document.addEventListener('input', (e) => {
 
 document.addEventListener('change', (e) => {
   if (e.target.dataset.actChange === 'backup-import') importBackup(e.target);
+  else if (e.target.dataset.s === 'name') renameAll(e.target.value);
 });
+
+/** Neuer Name aus den Einstellungen gilt für alle gespeicherten Zettel und Abrechnungen (beim Verlassen des Feldes) */
+function renameAll(value) {
+  const name = value.trim();
+  if (!name) return;
+  const now = Date.now();
+  let n = 0;
+  for (const s of sheets) {
+    if (s.name === name) continue;
+    s.name = name;
+    s.updatedAt = now;
+    n++;
+  }
+  let t = 0;
+  for (const trip of trips) {
+    if (trip.name === name) continue;
+    trip.name = name;
+    trip.updatedAt = now;
+    t++;
+  }
+  if (n) saveSheets();
+  if (t) saveTrips();
+  if (n || t) toast(`Name in ${n} Stundenzettel${n === 1 ? '' : 'n'}${t ? ` und ${t} Abrechnung${t === 1 ? '' : 'en'}` : ''} geändert`);
+}
 
 document.addEventListener('focusin', (e) => {
   if (e.target.matches('.txt')) showChips(e.target);
