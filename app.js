@@ -869,7 +869,7 @@ function summaryHTML(s) {
   let html = `<div class="sum-pill"><span class="sum-label">Stunden Gesamt</span><b>${fmtH(sheetTotal(s))}</b></div>`;
   if (settings.overtime) {
     const target = sheetTarget(s);
-    html += `<div class="sum-pill"><span class="sum-label">Überstunden (ab ${fmtH(Math.round(target * 60))})</span><b>${fmtH(sheetOvertime(s, target))}</b></div>`;
+    html += `<div class="sum-pill"><span class="sum-label">davon Überstunden</span><span class="sum-value"><b>${fmtH(sheetOvertime(s, target))}</b><span class="sum-sub">ab ${fmtH(Math.round(target * 60))}</span></span></div>`;
   }
   return html;
 }

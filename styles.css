@@ -390,6 +390,8 @@ input { font: inherit; color: inherit; }
 }
 .sum-label { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .sum-pill b { font-size: 17px; }
+.sum-value { display: inline-flex; align-items: baseline; gap: 5px; }
+.sum-sub { font-size: 12px; color: var(--muted); white-space: nowrap; }
 
 /* Fester Knopf unten */
 .bottom-bar {

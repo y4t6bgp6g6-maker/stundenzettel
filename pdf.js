@@ -250,7 +250,7 @@ function buildTimesheetPdf(sheet, overtimeTarget) {
   doc.textBox(fmtHours(sheetTotal(sheet)), xs[7] + 3, fy, xs[8] - xs[7] - 6, 14, 10, true, 'right');
   if (overtimeTarget != null) {
     fy += 18;
-    doc.textBox('Überstunden:', xs[5], fy, xs[7] - xs[5] - 6, 14, 10, true, 'right');
+    doc.textBox('davon Überstunden:', xs[5], fy, xs[7] - xs[5] - 6, 14, 10, true, 'right');
     doc.textBox(fmtHours(sheetOvertime(sheet, overtimeTarget)), xs[7] + 3, fy, xs[8] - xs[7] - 6, 14, 10, true, 'right');
   }
 
