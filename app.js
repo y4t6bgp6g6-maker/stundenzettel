@@ -2225,7 +2225,6 @@ function weekPicker(initial, excludeId, onPick, forTrip = false) {
   };
   if (forTrip) for (const t of trips) for (const d of new Set([t.from, ...t.dates])) mark(parseDate(d), !!t.sentAt);
   else for (const sh of sheets) if (sh.id !== excludeId) mark(parseDate(sh.weekStart), !!sh.sentAt);
-  const what = forTrip ? 'Abrechnung' : 'Zettel';
 
   /** Ein Monat als Raster: Kopfzeile, KW-Spalte, Tage – immer 6 Wochen, damit der Kalender beim Blättern gleich hoch bleibt */
   function gridHTML(m) {
@@ -2273,12 +2272,6 @@ function weekPicker(initial, excludeId, onPick, forTrip = false) {
         <button class="icon-btn" data-wp="next" aria-label="Nächster Monat">${ICON.chevronRight}</button>
       </div>
       <div class="wp-viewport"><div class="wp-strip">${gridHTML(prevMonth)}${gridHTML(month)}${gridHTML(nextMonth)}</div></div>
-      <div class="wp-legend">
-        <span><i class="lg-kw sent"></i>${what} gesendet</span>
-        <span><i class="lg-kw open"></i>${what} offen</span>
-        <span><i class="lg-today"></i>Heute</span>
-        <span><i class="lg-hol"></i>Feiertag</span>
-      </div>
       ${
         forTrip
           ? `<div class="wp-preview">
@@ -2295,14 +2288,15 @@ function weekPicker(initial, excludeId, onPick, forTrip = false) {
     viewport = wp.querySelector('.wp-viewport');
     strip = wp.querySelector('.wp-strip');
   }
-  /** Feiertage der gewählten Woche: „Feiertag: Fr 03.10. Tag der Deutschen Einheit“ */
+  /** Feiertage der gewählten Woche: „Feiertag: Fr 03.10. Tag der Deutschen Einheit“ (Platz für zwei Zeilen) */
   function holidaysLine() {
     const monday = mondayOf(selected);
     const list = [0, 1, 2, 3, 4, 5, 6]
       .map((i) => addDays(monday, i))
       .filter((d) => holidayName(d))
       .map((d) => `${WEEKDAYS_SHORT[(d.getDay() + 6) % 7]} ${fmtDayMonth(d)} ${escapeHtml(holidayName(d))}`);
-    return list.length ? `<span class="wp-hol-line">Feiertag: ${list.join(', ')}</span>` : '';
+    // Zeile ist immer da (auch leer), damit der Kalender beim Auswählen nicht springt
+    return `<span class="wp-hol-line">${list.length ? `Feiertag: ${list.join(', ')}` : ''}</span>`;
   }
 
   const POS = { '-1': '0%', 0: '-33.3333%', 1: '-66.6667%' };
