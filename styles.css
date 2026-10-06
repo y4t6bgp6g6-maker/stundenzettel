@@ -623,7 +623,10 @@ input { font: inherit; color: inherit; }
 /* Tage mit Tagesart: kompakte Zeile mit getöntem Etikett */
 .status-head { border-bottom: 0; padding: 10px 12px 10px 14px; gap: 10px; }
 .status-day.has-work .status-head { border-bottom: 0.5px solid var(--sep); }
-.status-when { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-when { min-width: 0; }
+.status-day-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Name des Feiertags in eigener Zeile, damit er ganz zu sehen ist */
+.status-sub { white-space: normal; font-size: 13px; color: color-mix(in srgb, var(--status) 72%, var(--text)); margin-top: 1px; }
 .status-btn.set.status-tag {
   display: inline-flex;
   align-items: center;

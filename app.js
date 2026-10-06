@@ -830,7 +830,7 @@ function dayHTML(s, i) {
           : `<button class="link-btn expand-btn" data-act="expand">${ICON.plus} Arbeit eintragen (z. B. Notdienst)</button>`;
     return `<section class="day status-day status-${day.status} wd-${i}${working ? ' has-work' : ''}" data-day="${i}">
       <div class="day-head status-head">
-        <div class="status-when"><b>${WEEKDAYS[i]}</b> <span class="muted">${fmtDayMonth(date)}${holiday ? ` · ${escapeHtml(holiday)}` : ''}</span></div>
+        <div class="status-when"><div class="status-day-line"><b>${WEEKDAYS[i]}</b> <span class="muted">${fmtDayMonth(date)}</span></div>${holiday ? `<div class="status-sub">${escapeHtml(holiday)}</div>` : ''}</div>
         <button class="chip-btn status-btn set status-tag" data-act="status">${ICON[day.status]} ${DAY_STATUS_SHORT[day.status]} · ${fmtH(statusCredit(day.status))} ▾</button>
       </div>
       ${extra}
