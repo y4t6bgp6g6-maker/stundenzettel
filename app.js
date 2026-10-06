@@ -2590,6 +2590,34 @@ document.addEventListener('touchend', () => (scrollTouch = null), { passive: tru
 document.addEventListener('focusin', () => (scrollTouch = null));
 window.addEventListener('scroll', dismissKeyboardOnScroll, { passive: true });
 if (window.visualViewport) visualViewport.addEventListener('scroll', dismissKeyboardOnScroll);
+
+/** Beginnt die Berührung im Feld, in dem gerade geschrieben wird (z. B. lange drücken für den Cursor),
+ *  scrollt die Seite nicht: Ziehen wird unterbunden und ein trotzdem ausgelöstes Scrollen zurückgesetzt. */
+let fieldTouch = null; // { y: Scrollstand beim Berühren }
+document.addEventListener(
+  'touchstart',
+  (e) => {
+    const el = typingField();
+    fieldTouch = el && e.touches.length === 1 && e.target === el && keyboardOpen() ? { y: window.scrollY } : null;
+  },
+  { passive: true }
+);
+document.addEventListener(
+  'touchmove',
+  (e) => {
+    if (fieldTouch && e.cancelable) e.preventDefault();
+  },
+  { passive: false }
+);
+window.addEventListener(
+  'scroll',
+  () => {
+    if (fieldTouch && window.scrollY !== fieldTouch.y) window.scrollTo(0, fieldTouch.y);
+  },
+  { passive: true }
+);
+document.addEventListener('touchend', () => (fieldTouch = null), { passive: true });
+document.addEventListener('focusout', () => (fieldTouch = null));
 if (window.visualViewport) {
   // Beim Scrollen nur mitziehen, sofort und ohne die Seite zu verschieben (sonst zittert die Leiste)
   visualViewport.addEventListener('resize', () => {
