@@ -184,6 +184,7 @@ delete settings.hourFormat;
 delete settings.prorateTarget;
 delete settings.credit;
 delete settings.overtime;
+settings.minuteStep = 30; // Zeitauswahl immer in 30-Minuten-Schritten
 
 /** Urlaubs- und Krankheitstage je Jahr (nach Datum des Tages) */
 function absenceStats() {
@@ -1665,15 +1666,6 @@ function renderSettings() {
     </div>
     <p class="footnote">Steht auf jedem neuen Stundenzettel.</p>
 
-    <h2 class="section-title">Eingabe &amp; Anzeige</h2>
-    <div class="card form">
-      <label class="field"><span>Zeitschritte</span>
-        <select data-s="minuteStep">
-          <option value="15" ${settings.minuteStep === 15 ? 'selected' : ''}>15 Minuten</option>
-          <option value="30" ${settings.minuteStep === 30 ? 'selected' : ''}>30 Minuten</option>
-        </select></label>
-    </div>
-
     ${hiddenSuggestionsHTML()}
 
     <h2 class="section-title">Reisekosten</h2>
@@ -2484,12 +2476,7 @@ document.addEventListener('input', (e) => {
     searchQuery = t.value;
     refreshListBody();
   } else if (t.dataset.s) {
-    const key = t.dataset.s;
-    if (key === 'minuteStep') {
-      settings.minuteStep = Number(t.value);
-    } else {
-      settings[key] = t.value;
-    }
+    settings[t.dataset.s] = t.value;
     saveSettings();
   }
 });
