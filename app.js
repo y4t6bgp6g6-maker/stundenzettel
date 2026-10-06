@@ -677,15 +677,23 @@ const fmtDays = (n) => `${fmtNum(n)} ${n === 1 ? 'Tag' : 'Tage'}`;
 function statsCardHTML() {
   const year = new Date().getFullYear();
   const st = absenceStats().get(year) || { urlaub: 0, krank: 0 };
+  const ot = yearBalance(overtimeAccount().get(year) || new Map());
   return `<a draggable="false" class="card stats-card" href="#/uebersicht">
     <span class="stats-year">${year}</span>
     <span class="stats-item"><span class="stats-num">${st.urlaub}</span><span class="stats-label">${st.urlaub === 1 ? 'Urlaubstag' : 'Urlaubstage'}</span></span>
-    <span class="stats-item"><span class="stats-num">${st.krank}</span><span class="stats-label">${st.krank === 1 ? 'Krankheitstag' : 'Krankheitstage'}</span></span>
+    <span class="stats-item"><span class="stats-num ${balanceClass(ot)}">${hoursHTML(ot)}</span><span class="stats-label">Überstunden</span></span>
     <span class="list-chevron">${ICON.chevronRight}</span>
   </a>`;
 }
 
 const balanceClass = (min) => (min > 0 ? 'plus' : min < 0 ? 'minus' : '');
+/** „+12,50“ mit kleinem „h“ dahinter (große Zahlen auf Karten) */
+const hoursHTML = (min) => `${fmtSigned(min).replace(/ h$/, '')}<small> h</small>`;
+const OV_ICON = {
+  clock: svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>', 18),
+  sun: svg('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>', 18),
+  cross: svg('<path d="M9 3h6v6h6v6h-6v6H9v-6H3V9h6z"/>', 18),
+};
 
 function renderStats() {
   const stats = absenceStats();
@@ -693,8 +701,6 @@ function renderStats() {
   const current = new Date().getFullYear();
   if (!stats.has(current)) stats.set(current, { urlaub: 0, krank: 0 });
   account.forEach((_, y) => { if (!stats.has(y)) stats.set(y, { urlaub: 0, krank: 0 }); });
-  const travel = tripYearStats();
-  travel.forEach((_, y) => { if (!stats.has(y)) stats.set(y, { urlaub: 0, krank: 0 }); });
   const years = [...stats.keys()].sort((a, b) => b - a);
   app.innerHTML = `
     <header class="nav">
@@ -702,15 +708,29 @@ function renderStats() {
       <span class="nav-title"></span>
       <span class="nav-btn"></span>
     </header>
+    <h1 class="large-title">Übersicht</h1>
     ${years
       .map((y) => {
         const st = stats.get(y);
-        return `<h2 class="section-title">${y}${y === current ? ' (laufendes Jahr)' : ''}</h2>
-        <div class="card form">
-          <div class="field"><span>Urlaubstage</span><b>${fmtDays(st.urlaub)}</b></div>
-          <div class="field"><span>Krankheitstage</span><b>${fmtDays(st.krank)}</b></div>
+        const ot = yearBalance(account.get(y) || new Map());
+        return `<h2 class="section-title ov-year">${y}${y === current ? '<span class="ov-badge">laufendes Jahr</span>' : ''}</h2>
+        <div class="ov-tiles">
+          <div class="ov-tile ov-hero">
+            <span class="ov-icon ot">${OV_ICON.clock}</span>
+            <span class="ov-label">Überstunden</span>
+            <span class="ov-num ${balanceClass(ot)}">${hoursHTML(ot)}</span>
+          </div>
+          <div class="ov-tile">
+            <span class="ov-icon vac">${OV_ICON.sun}</span>
+            <span class="ov-num">${fmtNum(st.urlaub)}</span>
+            <span class="ov-label">${st.urlaub === 1 ? 'Urlaubstag' : 'Urlaubstage'}</span>
+          </div>
+          <div class="ov-tile">
+            <span class="ov-icon sick">${OV_ICON.cross}</span>
+            <span class="ov-num">${fmtNum(st.krank)}</span>
+            <span class="ov-label">${st.krank === 1 ? 'Krankheitstag' : 'Krankheitstage'}</span>
+          </div>
         </div>
-        ${travel.has(y) ? tripYearHTML(travel.get(y)) : ''}
         ${account.has(y) ? overtimeYearHTML(y, account.get(y)) : ''}`;
       })
       .join('')}
@@ -718,44 +738,24 @@ function renderStats() {
     ${sheets.length ? `<p class="footnote">Überstunden: Pro Werktag zählt alles über ${fmtH(Math.round((settings.target * 60) / 5))}. Nur Tage mit Stundenzettel zählen. Plus und Minus werden verrechnet.</p>` : ''}`;
 }
 
-/** Reisekosten je Jahr: Tage auf Montage und Spesen (nach dem Datum der Tage) */
-function tripYearStats() {
-  const years = new Map();
-  const get = (y) => {
-    if (!years.has(y)) years.set(y, { days: 0, sum: 0 });
-    return years.get(y);
-  };
-  for (const t of trips) {
-    if (!t.dates.length) continue;
-    for (const r of tripRows(t)) {
-      const st = get(r.date.getFullYear());
-      st.days++;
-      st.sum += r.meal;
-    }
-  }
-  return years;
-}
-
-function tripYearHTML(st) {
-  return `<a draggable="false" class="card form trip-year" href="#/reisekosten">
-    <div class="field"><span>Tage auf Montage</span><b>${fmtDays(st.days)}</b></div>
-    <div class="field"><span>Spesen</span><b>${fmtEuro(st.sum)}</b></div>
-  </a>`;
-}
-
+/** Überstunden je Monat mit Balken: Plus nach rechts (grün), Minus nach links (rot), gemessen am größten Monat */
 function overtimeYearHTML(year, months) {
-  const rows = [...months.keys()]
-    .sort((a, b) => b - a)
-    .map(
-      (m) => `<button class="field month-link" data-act="goto-month" data-month="${year * 100 + m}">
-        <span>${MONTHS[m - 1]}</span>
-        <span class="month-link-value"><b class="${balanceClass(months.get(m))}">${fmtSigned(months.get(m))}</b><span class="list-chevron">${ICON.chevronRight}</span></span>
-      </button>`
-    )
+  const keys = [...months.keys()].sort((a, b) => b - a);
+  const max = Math.max(1, ...keys.map((m) => Math.abs(months.get(m))));
+  const rows = keys
+    .map((m) => {
+      const v = months.get(m);
+      const w = (Math.abs(v) / max) * 50;
+      return `<button class="ov-month" data-act="goto-month" data-month="${year * 100 + m}">
+        <span class="ov-m-name">${MONTHS[m - 1]}</span>
+        <span class="ov-bar"><i class="${balanceClass(v)}" style="${v < 0 ? 'right' : 'left'}: 50%; width: ${w.toFixed(1)}%"></i></span>
+        <b class="ov-m-val ${balanceClass(v)}">${fmtSigned(v)}</b>
+        <span class="list-chevron">${ICON.chevronRight}</span>
+      </button>`;
+    })
     .join('');
-  const total = yearBalance(months);
-  return `<div class="card form overtime-card">
-    <div class="field year-total"><span>Überstunden ${year}</span><b class="${balanceClass(total)}">${fmtSigned(total)}</b></div>
+  return `<div class="card ov-months">
+    <div class="ov-card-head">Überstunden je Monat</div>
     ${rows}
   </div>`;
 }
