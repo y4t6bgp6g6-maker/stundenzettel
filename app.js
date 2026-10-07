@@ -3022,10 +3022,77 @@ window.addEventListener(
 );
 document.addEventListener('touchend', () => (fieldTouch = null), { passive: true });
 document.addEventListener('focusout', () => (fieldTouch = null));
+
+/** Antippen eines Textfelds: iOS scrollt die Seite sonst beim Fokussieren, auch wenn das Feld über der Tastatur
+ *  sichtbar bliebe. Darum selbst fokussieren, ohne zu scrollen, und den Cursor an die angetippte Stelle setzen
+ *  (den Klick danach unterdrücken, sonst scrollt iOS doch). Verdeckt die Tastatur oder die
+ *  Vorschlagsleiste das Feld, schiebt es `revealField` bzw. `placeSuggestBar` nur so weit wie nötig nach oben. */
+const TAP_FIELDS = 'textarea, input:not([type]), input[type="text"]';
+let tapStart = null; // { x, y }
+document.addEventListener(
+  'touchstart',
+  (e) => (tapStart = e.touches.length === 1 ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null),
+  { passive: true }
+);
+document.addEventListener(
+  'touchend',
+  (e) => {
+    const el = e.target.closest?.(TAP_FIELDS);
+    const t = e.changedTouches[0];
+    if (!el || el === document.activeElement || el.disabled || el.readOnly || !tapStart) return;
+    if (Math.hypot(t.clientX - tapStart.x, t.clientY - tapStart.y) > 10) return;
+    const pos = caretAt(el, t.clientX, t.clientY);
+    // Ohne den folgenden Klick, der iOS sonst doch noch scrollen lässt
+    if (e.cancelable) e.preventDefault();
+    el.focus({ preventScroll: true });
+    el.setSelectionRange(pos, pos);
+  },
+  { passive: false }
+);
+/** Textstelle unter einem Punkt im Feld: Text in einer unsichtbaren Kopie mit gleicher Schrift und Breite nachmessen.
+ *  Wie bei iOS landet der Cursor am Wortende bzw. -anfang, nicht mitten im Wort. */
+function caretAt(el, x, y) {
+  const text = el.value;
+  const cs = getComputedStyle(el);
+  const r = el.getBoundingClientRect();
+  const m = document.createElement('div');
+  for (const p of ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing', 'wordSpacing', 'textIndent', 'lineHeight', 'textAlign', 'boxSizing'])
+    m.style[p] = cs[p];
+  for (const side of ['Top', 'Right', 'Bottom', 'Left']) {
+    m.style[`padding${side}`] = cs[`padding${side}`];
+    m.style[`border${side}Width`] = cs[`border${side}Width`];
+  }
+  // Unsichtbar (durchsichtige Schrift), aber kurz oben auf, damit die Abfrage die Kopie trifft
+  Object.assign(m.style, {
+    position: 'fixed', left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px`,
+    whiteSpace: el.tagName === 'TEXTAREA' ? 'pre-wrap' : 'pre', overflowWrap: 'break-word', overflow: 'hidden',
+    color: 'transparent', background: 'none', borderStyle: 'solid', borderColor: 'transparent', zIndex: '2147483647',
+    webkitUserSelect: 'text', userSelect: 'text',
+  });
+  m.textContent = text;
+  document.body.appendChild(m);
+  const hit = document.caretRangeFromPoint?.(x, y);
+  const pos = hit && hit.startContainer === m.firstChild ? hit.startOffset : text.length;
+  m.remove();
+  // Wie iOS: im Wort an dessen Anfang oder Ende, je nachdem, was näher liegt
+  const before = text.slice(0, pos).search(/\S*$/);
+  const after = pos + text.slice(pos).search(/\s|$/);
+  return pos - before <= after - pos ? before : after;
+}
+/** Feld, in dem geschrieben wird, über der Tastatur halten (mit Vorschlägen übernimmt das `placeSuggestBar`) */
+function revealField() {
+  const el = typingField();
+  if (!el || !keyboardOpen() || suggestBar.classList.contains('show') || el.closest('.nav, #modal-layer')) return;
+  const bottom = visualViewport.offsetTop + visualViewport.height;
+  const r = el.getBoundingClientRect();
+  if (r.bottom > bottom - 8) window.scrollBy(0, r.bottom - bottom + 16);
+}
+
 if (window.visualViewport) {
   // Beim Scrollen nur mitziehen, sofort und ohne die Seite zu verschieben (sonst zittert die Leiste)
   visualViewport.addEventListener('resize', () => {
     placeSuggestBar();
+    revealField();
     placeNav();
   });
   visualViewport.addEventListener('scroll', () => {
