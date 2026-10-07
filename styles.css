@@ -35,7 +35,8 @@
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-html { -webkit-text-size-adjust: 100%; }
+/* Kein Zoomen der App-Seiten (Doppeltipp); Zwei-Finger-Zoom fängt app.js ab – nur die PDF-Vorschau zoomt selbst */
+html { -webkit-text-size-adjust: 100%; touch-action: manipulation; }
 body {
   margin: 0;
   background: var(--bg);

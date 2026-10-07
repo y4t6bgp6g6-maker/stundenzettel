@@ -1111,6 +1111,12 @@ function pdfFileFor(s) {
   return new File([blob], `${sheetTitle(s)}.pdf`, { type: 'application/pdf' });
 }
 
+// ───────────────────────── Kein Zoomen ─────────────────────────
+// iOS ignoriert „user-scalable=no“ teilweise: Zwei-Finger-Zoom der Seite überall abfangen. Die PDF-Vorschau zoomt
+// über eigene Touch-Steuerung und ist davon nicht betroffen.
+for (const type of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(type, (e) => e.preventDefault(), { passive: false });
+document.addEventListener('touchmove', (e) => e.touches.length > 1 && e.preventDefault(), { passive: false });
+
 // ───────────────────────── PDF-Vorschau ─────────────────────────
 // Am Ende des Zettels bzw. der Reisekostenabrechnung eine kleine Vorschau des PDFs (iOS zeigt PDFs direkt als Bild an);
 // Antippen öffnet sie groß. Senden geht bewusst nicht aus der Vorschau heraus.
