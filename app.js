@@ -816,6 +816,8 @@ function renderEditor(id) {
     <div id="days">${daysHTML(s)}</div>
     <div class="sum-bar" id="summary">${summaryHTML(s)}</div>
     ${pdfThumbHTML('Zettel')}`;
+  fitRowTexts();
+  requestAnimationFrame(fitRowTexts);
   updatePdfThumb(true);
 }
 
@@ -941,9 +943,9 @@ function rowHTML(day, r) {
       <span class="row-hours">${m == null ? '' : fmtH(m)}</span>
       ${rowCount > 1 ? `<button class="row-del" data-act="delrow" aria-label="Zeile löschen">${ICON.close}</button>` : '<span class="row-del-space"></span>'}
     </div>
-    <div class="suggest-wrap ${fieldMissing(day, r, 'site') ? 'missing' : ''}"><span class="field-icon">${ICON.pin}</span><span class="warn" aria-label="fehlt">⚠️</span><input class="txt" data-f="site" placeholder="Ort" maxlength="${MAX_LEN.site}" value="${escapeHtml(r.site)}" autocomplete="off" autocapitalize="sentences" enterkeyhint="next"></div>
+    <div class="suggest-wrap ${fieldMissing(day, r, 'site') ? 'missing' : ''}"><span class="field-icon">${ICON.pin}</span><span class="warn" aria-label="fehlt">⚠️</span><textarea class="txt" data-f="site" rows="1" placeholder="Ort" maxlength="${MAX_LEN.site}" autocomplete="off" autocapitalize="sentences" enterkeyhint="next">${escapeHtml(r.site)}</textarea></div>
     ${typoHintHTML('site', r)}
-    <div class="suggest-wrap ${fieldMissing(day, r, 'work') ? 'missing' : ''}"><span class="field-icon">${ICON.tool}</span><span class="warn" aria-label="fehlt">⚠️</span><input class="txt" data-f="work" placeholder="Arbeit" maxlength="${MAX_LEN.work}" value="${escapeHtml(r.work)}" autocomplete="off" autocapitalize="sentences" enterkeyhint="done"></div>
+    <div class="suggest-wrap ${fieldMissing(day, r, 'work') ? 'missing' : ''}"><span class="field-icon">${ICON.tool}</span><span class="warn" aria-label="fehlt">⚠️</span><textarea class="txt" data-f="work" rows="1" placeholder="Arbeit" maxlength="${MAX_LEN.work}" autocomplete="off" autocapitalize="sentences" enterkeyhint="done">${escapeHtml(r.work)}</textarea></div>
     ${typoHintHTML('work', r)}
   </div>`;
 }
@@ -960,6 +962,7 @@ function refreshDay(i) {
   const s = currentSheet();
   const el = document.querySelector(`.day[data-day="${i}"]`);
   if (el) el.outerHTML = dayHTML(s, i);
+  fitRowTexts();
   refreshSummary();
 }
 function refreshSummary() {
@@ -1586,6 +1589,9 @@ function refreshTrip() {
   fitTripTexts();
   window.scrollTo(0, y);
 }
+/** Baustelle / Art der Arbeit: Feld so hoch wie sein Text (mehrzeilig statt rechts abgeschnitten) */
+const fitRowTexts = () => document.querySelectorAll('textarea.txt').forEach(fitTextarea);
+window.addEventListener('resize', () => currentView === 'editor' && fitRowTexts());
 const fitTextarea = (el) => {
   el.style.height = 'auto';
   // + Rahmen (Linie unten), weil die Höhe den Rahmen mit einschließt
@@ -3099,6 +3105,9 @@ document.addEventListener('input', (e) => {
   if (t.dataset.f) {
     const s = currentSheet();
     if (!s) return;
+    // Ein Eintrag bleibt eine Zeile Text (eingefügte Zeilenumbrüche werden zu Leerzeichen); das Feld wächst mit
+    if (/\n/.test(t.value)) t.value = t.value.replace(/\s*\n\s*/g, ' ');
+    if (t.matches('textarea')) fitTextarea(t);
     const { row } = rowContext(t);
     if (row) {
       row[t.dataset.f] = t.value;
@@ -3186,10 +3195,14 @@ document.addEventListener('focusout', (e) => {
   if (e.target.dataset.f && currentSheet()) refreshTypoHint(e.target);
 });
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && e.target.matches('input:not([type=checkbox])')) {
+  if (e.key === 'Enter' && e.target.matches('input:not([type=checkbox]), textarea.txt')) {
     // „Weiter“ springt zum nächsten Feld der Zeile
-    if (e.target.dataset.f === 'site') e.target.closest('.row').querySelector('[data-f="work"]').focus();
-    else e.target.blur();
+    if (e.target.dataset.f === 'site') {
+      const work = e.target.closest('.row').querySelector('[data-f="work"]');
+      work.focus();
+      // Mehrzeilige Felder setzen den Cursor sonst an den Anfang
+      work.setSelectionRange(work.value.length, work.value.length);
+    } else e.target.blur();
     e.preventDefault();
   }
 });
