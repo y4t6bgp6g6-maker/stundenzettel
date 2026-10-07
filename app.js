@@ -213,9 +213,9 @@ function absenceStats() {
  * Wochen ohne Zettel kommen in der Rechnung nicht vor.
  * Soll: jeder Werktag Mo–Fr mit Wochen-Soll ÷ 5; Tage nach heute zählen noch nicht.
  * Ist: „Stunden Gesamt“ des Tages (inkl. gutgeschriebener Stunden für Urlaub, Krankheit, Feiertag).
- * Ergebnis: Map Jahr → Map Monat (1–12) → Saldo in Minuten
+ * Ergebnis: Map Jahr → Map Monat (1–12) → Saldo in Minuten; mit `worked` stattdessen das Ist (Stunden Gesamt)
  */
-function overtimeAccount() {
+function overtimeAccount(worked = false) {
   const result = new Map();
   const dailySoll = Math.round((settings.target * 60) / 5);
   const today = startOfDay(new Date());
@@ -228,7 +228,7 @@ function overtimeAccount() {
       const m = date.getMonth() + 1;
       if (!result.has(y)) result.set(y, new Map());
       const months = result.get(y);
-      months.set(m, (months.get(m) || 0) + dayTotal(d) - soll);
+      months.set(m, (months.get(m) || 0) + dayTotal(d) - (worked ? 0 : soll));
     });
   }
   return result;
@@ -398,8 +398,6 @@ const ICON = {
 const app = document.getElementById('app');
 let listScroll = 0;
 let currentView = '';
-/** Monat (JJJJMM), zu dem die Liste nach dem Öffnen scrollen soll */
-let pendingMonth = null;
 /** Suchbegriff in der Liste; null = Suche geschlossen */
 let searchQuery = null;
 
@@ -441,16 +439,7 @@ function route() {
     currentView = 'list';
     renderList();
     syncNav();
-    if (pendingMonth) {
-      const key = pendingMonth;
-      pendingMonth = null;
-      scrollToMonth(key);
-      // iOS setzt die Scroll-Position nach dem Seitenwechsel teils noch einmal zurück
-      requestAnimationFrame(() => scrollToMonth(key));
-      setTimeout(() => scrollToMonth(key), 120);
-    } else {
-      window.scrollTo(0, listScroll);
-    }
+    window.scrollTo(0, listScroll);
   }
   updateTopButton();
 }
@@ -573,7 +562,7 @@ function listBodyHTML() {
           if (sh.missing && Array.isArray(rows.at(-1))) rows.at(-1).push(sh);
           else rows.push(sh.missing ? [sh] : sh);
         }
-        return `<h2 class="section-title month-head" id="m-${k}"><span>${MONTHS[(k % 100) - 1]} ${Math.floor(k / 100)}</span>${searching ? '' : `<span class="month-total">Gesamt ${fmtH(monthTotal)}</span>`}</h2>
+        return `<h2 class="section-title month-head"><span>${MONTHS[(k % 100) - 1]} ${Math.floor(k / 100)}</span>${searching ? '' : `<span class="month-total">Gesamt ${fmtH(monthTotal)}</span>`}</h2>
         <div class="card list">${rows.map((r) => (Array.isArray(r) ? gapRowHTML(r) : listRowHTML(r, hits.get(r.id)))).join('')}</div>`;
       })
       .join('');
@@ -665,11 +654,6 @@ function syncNav() {
 }
 new MutationObserver(syncNav).observe(app, { childList: true });
 
-function scrollToMonth(key) {
-  const el = document.getElementById(`m-${key}`);
-  if (el) window.scrollTo(0, el.getBoundingClientRect().top + window.scrollY - navHeight() - 4);
-}
-
 /** Knopf „nach oben“ erst zeigen, wenn weit genug gescrollt wurde */
 function updateTopButton() {
   const btn = document.querySelector('.to-top');
@@ -741,27 +725,25 @@ function renderStats() {
       })
       .join('')}
     <p class="footnote">Gezählt werden alle Tage, die du als Urlaub oder Krankheit markiert hast.</p>
-    ${sheets.length ? `<p class="footnote">Überstunden: Pro Werktag zählt alles über ${fmtH(Math.round((settings.target * 60) / 5))}. Nur Tage mit Stundenzettel zählen. Plus und Minus werden verrechnet.</p>` : ''}`;
+    ${sheets.length ? `<p class="footnote">Überstunden: Pro Werktag zählt alles über ${fmtH(Math.round((settings.target * 60) / 5))}. Nur Tage mit Stundenzettel zählen. Plus und Minus werden verrechnet. Stunden: wie „Stunden Gesamt“ im Stundenzettel, Urlaub, Krankheit und Feiertage mit je ${fmtH(statusCredit('urlaub'))}.</p>` : ''}`;
 }
 
-/** Überstunden je Monat mit Balken: Plus nach rechts (grün), Minus nach links (rot), gemessen am größten Monat */
+/** Je Monat die gearbeiteten Stunden (Stunden Gesamt) und die Überstunden als Tabelle, neuester Monat oben */
 function overtimeYearHTML(year, months) {
-  const keys = [...months.keys()].sort((a, b) => b - a);
-  const max = Math.max(1, ...keys.map((m) => Math.abs(months.get(m))));
-  const rows = keys
+  const worked = overtimeAccount(true).get(year) || new Map();
+  const rows = [...months.keys()]
+    .sort((a, b) => b - a)
     .map((m) => {
       const v = months.get(m);
-      const w = (Math.abs(v) / max) * 50;
-      return `<button class="ov-month" data-act="goto-month" data-month="${year * 100 + m}">
-        <span class="ov-m-name">${MONTHS[m - 1]}</span>
-        <span class="ov-bar"><i class="${balanceClass(v)}" style="${v < 0 ? 'right' : 'left'}: 50%; width: ${w.toFixed(1)}%"></i></span>
-        <b class="ov-m-val ${balanceClass(v)}">${fmtSigned(v)}</b>
-        <span class="list-chevron">${ICON.chevronRight}</span>
-      </button>`;
+      return `<div class="ov-row">
+        <span>${MONTHS[m - 1]}</span>
+        <span class="ov-n">${fmtH(worked.get(m) || 0)}</span>
+        <b class="ov-n ${balanceClass(v)}">${fmtSigned(v)}</b>
+      </div>`;
     })
     .join('');
   return `<div class="card ov-months">
-    <div class="ov-card-head">Überstunden je Monat</div>
+    <div class="ov-row ov-head"><span>Monat</span><span class="ov-n">Stunden</span><span class="ov-n">Überstunden</span></div>
     ${rows}
   </div>`;
 }
@@ -3331,10 +3313,6 @@ document.addEventListener('click', (e) => {
       break;
     case 'to-top':
       window.scrollTo({ top: 0, behavior: 'smooth' });
-      break;
-    case 'goto-month':
-      pendingMonth = Number(el.dataset.month);
-      location.replace('#/');
       break;
     case 'jump':
       jumpToDay(Number(el.dataset.day));

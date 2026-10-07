@@ -980,16 +980,9 @@ button.nav-title { font-size: 17px; }
 .ov-label { font-size: 14px; color: var(--muted); }
 .ov-hero .ov-label { font-size: 17px; font-weight: 600; color: var(--text); }
 .ov-months { margin-top: 10px; border-radius: 16px; }
-.ov-card-head { padding: 12px 16px 6px; font-size: 13px; font-weight: 600; color: var(--muted); }
-.ov-month { display: grid; grid-template-columns: 82px 1fr 78px auto; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 0 10px 0 16px; text-align: left; border-top: 0.5px solid var(--sep); }
-.ov-month:active { background: var(--fill); }
-.ov-m-name { font-size: 16px; }
-.ov-bar { position: relative; height: 8px; border-radius: 4px; background: var(--fill); overflow: hidden; }
-.ov-bar::after { content: ''; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--sep); }
-.ov-bar i { position: absolute; top: 0; bottom: 0; border-radius: 4px; }
-.ov-bar i.plus { background: var(--success); }
-.ov-bar i.minus { background: var(--danger); }
-.ov-m-val { text-align: right; font-variant-numeric: tabular-nums; font-size: 15px; }
+.ov-row { display: grid; grid-template-columns: 1fr 96px 104px; align-items: center; min-height: 44px; padding: 0 16px; border-top: 0.5px solid var(--sep); font-size: 16px; }
+.ov-head { min-height: 36px; border-top: 0; font-size: 13px; font-weight: 600; color: var(--muted); }
+.ov-n { text-align: right; font-variant-numeric: tabular-nums; }
 
 /* PDF-Vorschau: klein am Ende des Zettels, groß als eigene Seite */
 .pv-thumb { display: flex; align-items: center; gap: 14px; width: 100%; margin-top: 16px; padding: 12px; border-radius: 16px; background: var(--card); text-align: left; }
