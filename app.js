@@ -46,6 +46,8 @@ const sameKey = (s) => String(s ?? '').trim().toLowerCase().replace(/[’‘`´�
 const searchKey = (s) => sameKey(s).replace(/['\s,.\-–]/g, '');
 /** Höchstlängen, damit der Text im PDF in drei Zeilen der kleineren Schriftstufe passt (ohne Zähler) */
 const MAX_LEN = { site: 60, work: 100 };
+/** Reisekosten: Reiseorte bzw. Tätigkeiten je Kasten höchstens zwei Zeilen im PDF */
+const TRIP_MAX_LEN = 100;
 const escapeHtml = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
@@ -1564,8 +1566,8 @@ function tripDayHTML(r) {
       ${tripDayIssues(r)
         .map((x) => `<p class="trip-issue">⚠️ ${escapeHtml(x)}</p>`)
         .join('')}
-      <div class="trip-field"><span class="field-icon">${ICON.pin}</span><textarea class="trip-text" data-t="places" rows="1" placeholder="Reiseorte (Baustellen)" autocapitalize="sentences">${escapeHtml(r.places)}</textarea></div>
-      <div class="trip-field"><span class="field-icon">${ICON.tool}</span><textarea class="trip-text" data-t="works" rows="1" placeholder="Tätigkeiten" autocapitalize="sentences">${escapeHtml(r.works)}</textarea></div>
+      <div class="trip-field"><span class="field-icon">${ICON.pin}</span><textarea class="trip-text" data-t="places" rows="1" maxlength="${TRIP_MAX_LEN}" placeholder="Reiseorte (Baustellen)" autocapitalize="sentences">${escapeHtml(r.places)}</textarea></div>
+      <div class="trip-field"><span class="field-icon">${ICON.tool}</span><textarea class="trip-text" data-t="works" rows="1" maxlength="${TRIP_MAX_LEN}" placeholder="Tätigkeiten" autocapitalize="sentences">${escapeHtml(r.works)}</textarea></div>
     </div>
     <div class="day-foot">
       <span>Verpflegung</span>
@@ -3118,6 +3120,8 @@ document.addEventListener('input', (e) => {
     const trip = currentTrip();
     const iso = t.closest('[data-date]').dataset.date;
     if (t.dataset.t === 'places' || t.dataset.t === 'works') {
+      // Jeder Kasten im PDF ist eine Textzeile (höchstens zweizeilig umbrochen): keine Zeilenumbrüche
+      if (/\n/.test(t.value)) t.value = t.value.replace(/\s*\n\s*/g, ' ');
       // Beide Felder speichern, damit eine alte gemeinsame Fassung („text“) nicht mehr gilt
       const dayEl = t.closest('.trip-day');
       const o = { ...(trip.over[iso] || {}) };
@@ -3184,6 +3188,12 @@ document.addEventListener('focusout', (e) => {
   if (e.target.dataset.f && currentSheet()) refreshTypoHint(e.target);
 });
 document.addEventListener('keydown', (e) => {
+  // Reisekosten: Return schließt die Tastatur (kein Zeilenumbruch im Kasten)
+  if (e.key === 'Enter' && e.target.matches('textarea.trip-text')) {
+    e.target.blur();
+    e.preventDefault();
+    return;
+  }
   if (e.key === 'Enter' && e.target.matches('input:not([type=checkbox]), textarea.txt')) {
     // „Weiter“ springt zum nächsten Feld der Zeile
     if (e.target.dataset.f === 'site') {

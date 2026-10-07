@@ -319,7 +319,7 @@ function wrapLines(text, w, size) {
 
 /**
  * Reisekostenabrechnung nach dem Formular des Arbeitgebers (A4 quer).
- * @param t { name, from, to, rows: [{ date, start, end, minutes, text, meal }], total, place, signDate, signature, title }
+ * @param t { name, from, to, rows: [{ date, start, end, minutes, places, works, meal }], total, place, signDate, signature, title }
  */
 function buildTravelPdf(t) {
   const W = 841.89;
@@ -378,31 +378,18 @@ function buildTravelPdf(t) {
   const bodyTop = tableTop + headerH;
 
   // Wie im Formular: doppelt hohe Zeilen; nur „Beginn/Ende“ und „Reiseanlass“ sind in zwei halbe Zeilen geteilt.
-  // Ein Tag belegt eine Doppelzeile: Text bis zwei Zeilen eine Zeile je Kasten (Orte oben, Tätigkeiten unten);
-  // mehr Text zwei Zeilen je Kasten, und erst dann geht es in den Kästen darunter weiter. Wiederholter Text wird
-  // immer ausgeschrieben. Darunter eine ungeteilte Schlusszeile.
-  let fs = 9;
-  const layout = (size) =>
-    t.rows.map((r) => {
-      const lines = wrapLines(r.text, colW(2) - 8, size);
-      const perBox = lines.length <= 2 ? 1 : 2;
-      const boxes = Math.max(1, Math.ceil(lines.length / perBox));
-      return { r, lines, perBox, pairs: Math.max(1, Math.ceil(boxes / 2)) };
-    });
-  let blocks;
-  let pairCount;
-  let rowH;
-  for (;;) {
-    blocks = layout(fs);
-    pairCount = Math.max(7, blocks.reduce((a, b) => a + b.pairs, 0)) + 1;
-    rowH = (sumTop - bodyTop) / (pairCount * 2);
-    // Zwei Zeilen in einem Kasten brauchen mehr Höhe: dann gilt die kleinere Schrift für die ganze Abrechnung
-    const twoPerBox = blocks.some((b) => b.perBox === 2);
-    if (rowH >= fs * (twoPerBox ? 2.3 : 1.25) || fs <= 5) break;
-    fs -= 0.25;
-  }
+  // Ein Tag belegt genau eine Doppelzeile: oben die Reiseorte, unten die Tätigkeiten, je Kasten bis zu zwei Zeilen.
+  // Braucht ein Kasten zwei Zeilen, gilt die kleinere Schrift für die ganze Abrechnung. Nichts läuft in den nächsten
+  // Tag weiter (die App begrenzt die Textlänge); nur zu lange übernommene Texte werden in ihrem Kasten verkleinert.
+  // Darunter eine ungeteilte Schlusszeile.
+  const textW = colW(2) - 8;
+  const pairCount = Math.max(7, t.rows.length) + 1;
+  const rowH = (sumTop - bodyTop) / (pairCount * 2);
   const pairH = 2 * rowH;
   const bodyBottom = bodyTop + pairCount * pairH;
+  const boxTexts = t.rows.flatMap((r) => [r.places || '', r.works || ''].map((x) => x.trim()));
+  let fs = Math.min(9, rowH / 1.25);
+  if (boxTexts.some((x) => wrapLines(x, textW, fs).length > 1)) fs = Math.min(fs, rowH / 2.3);
 
   headers.forEach((h, c) => {
     const lines = h.split('\n');
@@ -416,24 +403,31 @@ function buildTravelPdf(t) {
     const padX = c === 3 ? 1.5 : 4; // schmale Spalte „Std.“
     doc.textBox(text, xs[c] + padX, y, colW(c) - 2 * padX, h, fs, false, align);
   };
-  let pair = 0;
-  for (const { r, lines, perBox, pairs } of blocks) {
-    const y = bodyTop + pair * pairH;
+  /** Ein Kasten „Reiseanlass“: bis zu zwei Zeilen, senkrecht mittig */
+  const textBoxCell = (text, y) => {
+    if (!text) return;
+    let size = fs;
+    let lines = wrapLines(text, textW, size);
+    while (lines.length > 2 && size > 4) lines = wrapLines(text, textW, (size -= 0.25));
+    lines = lines.slice(0, 2);
+    const lh = size * 1.15;
+    lines.forEach((l, i) =>
+      doc.textBox(l, xs[2] + 4, y + (rowH - lines.length * lh) / 2 + i * lh, textW, lh, size, false, 'left')
+    );
+  };
+  t.rows.forEach((r, k) => {
+    const y = bodyTop + k * pairH;
     cell(0, y, pairH, fmtDayMonth(r.date), 'center');
     if (r.start != null) cell(1, y, rowH, clock(r.start), 'center');
     if (r.end != null) cell(1, y + rowH, rowH, clock(r.end), 'center');
-    if (perBox === 1) lines.forEach((l, i) => cell(2, y + i * rowH, rowH, l, 'left'));
-    else {
-      const lh = fs * 1.15;
-      lines.forEach((l, i) => cell(2, y + Math.floor(i / 2) * rowH + (rowH - 2 * lh) / 2 + (i % 2) * lh, lh, l, 'left'));
-    }
+    textBoxCell((r.places || '').trim(), y);
+    textBoxCell((r.works || '').trim(), y + rowH);
     if (r.minutes != null) cell(3, y, pairH, hours(r.minutes), 'center');
     if (r.meal) {
       cell(4, y, pairH, money(r.meal));
       cell(9, y, pairH, money(r.meal));
     }
-    pair += pairs;
-  }
+  });
 
   // Tabellenlinien
   doc.line(L, tableTop, R, tableTop, 0.9, 0);
