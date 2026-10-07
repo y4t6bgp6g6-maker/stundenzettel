@@ -1,5 +1,5 @@
 // Offline-Cache: Mit Internet wird immer die neueste Version geladen, ohne Internet die gespeicherte.
-const CACHE = 'stundenzettel-v107';
+const CACHE = 'stundenzettel-v108';
 const ASSETS = [
   './',
   'index.html',
@@ -22,7 +22,8 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      // Nur eigene alte Versionen löschen: andere Apps unter derselben Adresse (github.io) haben eigene Caches
+      .then((keys) => Promise.all(keys.filter((k) => k.startsWith('stundenzettel-') && k !== CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
