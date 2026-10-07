@@ -319,7 +319,7 @@ function wrapLines(text, w, size) {
 
 /**
  * Reisekostenabrechnung nach dem Formular des Arbeitgebers (A4 quer).
- * @param t { name, from, to, rows: [{ date, start, end, minutes, text, ditto, meal }], total, place, signDate, signature, title }
+ * @param t { name, from, to, rows: [{ date, start, end, minutes, text, meal }], total, place, signDate, signature, title }
  */
 function buildTravelPdf(t) {
   const W = 841.89;
@@ -378,12 +378,16 @@ function buildTravelPdf(t) {
   const bodyTop = tableTop + headerH;
 
   // Wie im Formular: doppelt hohe Zeilen; nur „Beginn/Ende“ und „Reiseanlass“ sind in zwei halbe Zeilen geteilt.
-  // Ein Tag belegt eine Doppelzeile, bei langem Reiseanlass entsprechend mehr. Darunter eine ungeteilte Schlusszeile.
+  // Ein Tag belegt eine Doppelzeile: Text bis zwei Zeilen eine Zeile je Kasten (Orte oben, Tätigkeiten unten);
+  // mehr Text zwei Zeilen je Kasten, und erst dann geht es in den Kästen darunter weiter. Wiederholter Text wird
+  // immer ausgeschrieben. Darunter eine ungeteilte Schlusszeile.
   let fs = 9;
   const layout = (size) =>
     t.rows.map((r) => {
-      const lines = r.ditto ? ['"'] : wrapLines(r.text, colW(2) - 8, size);
-      return { r, lines, pairs: Math.max(1, Math.ceil(lines.length / 2)) };
+      const lines = wrapLines(r.text, colW(2) - 8, size);
+      const perBox = lines.length <= 2 ? 1 : 2;
+      const boxes = Math.max(1, Math.ceil(lines.length / perBox));
+      return { r, lines, perBox, pairs: Math.max(1, Math.ceil(boxes / 2)) };
     });
   let blocks;
   let pairCount;
@@ -392,8 +396,10 @@ function buildTravelPdf(t) {
     blocks = layout(fs);
     pairCount = Math.max(7, blocks.reduce((a, b) => a + b.pairs, 0)) + 1;
     rowH = (sumTop - bodyTop) / (pairCount * 2);
-    if (rowH >= fs * 1.25 || fs <= 5) break;
-    fs -= 0.5;
+    // Zwei Zeilen in einem Kasten brauchen mehr Höhe: dann gilt die kleinere Schrift für die ganze Abrechnung
+    const twoPerBox = blocks.some((b) => b.perBox === 2);
+    if (rowH >= fs * (twoPerBox ? 2.3 : 1.25) || fs <= 5) break;
+    fs -= 0.25;
   }
   const pairH = 2 * rowH;
   const bodyBottom = bodyTop + pairCount * pairH;
@@ -411,12 +417,16 @@ function buildTravelPdf(t) {
     doc.textBox(text, xs[c] + padX, y, colW(c) - 2 * padX, h, fs, false, align);
   };
   let pair = 0;
-  for (const { r, lines, pairs } of blocks) {
+  for (const { r, lines, perBox, pairs } of blocks) {
     const y = bodyTop + pair * pairH;
     cell(0, y, pairH, fmtDayMonth(r.date), 'center');
     if (r.start != null) cell(1, y, rowH, clock(r.start), 'center');
     if (r.end != null) cell(1, y + rowH, rowH, clock(r.end), 'center');
-    lines.forEach((l, i) => cell(2, y + i * rowH, rowH, l, r.ditto ? 'center' : 'left'));
+    if (perBox === 1) lines.forEach((l, i) => cell(2, y + i * rowH, rowH, l, 'left'));
+    else {
+      const lh = fs * 1.15;
+      lines.forEach((l, i) => cell(2, y + Math.floor(i / 2) * rowH + (rowH - 2 * lh) / 2 + (i % 2) * lh, lh, l, 'left'));
+    }
     if (r.minutes != null) cell(3, y, pairH, hours(r.minutes), 'center');
     if (r.meal) {
       cell(4, y, pairH, money(r.meal));

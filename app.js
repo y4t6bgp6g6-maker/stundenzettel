@@ -1307,7 +1307,6 @@ function tripAuto(trip, iso) {
 
 /** Alle Reisetage mit den gültigen Werten (eigene Änderungen vor Werten aus dem Stundenzettel) */
 function tripRows(trip) {
-  let prevText = null;
   return [...trip.dates].sort().map((iso) => {
     const auto = tripAuto(trip, iso);
     const over = { ...(trip.over[iso] || {}) };
@@ -1326,10 +1325,7 @@ function tripRows(trip) {
     const text = [places.trim(), works.trim()].filter(Boolean).join('\n');
     const meal = pick('meal') || 0;
     const minutes = start != null && end != null ? (end >= start ? end - start : end + 1440 - start) : null;
-    // Gleicher Text wie in der Zeile darüber: im PDF steht nur „〃“
-    const ditto = !!text.trim() && text.trim() === prevText;
-    prevText = text.trim();
-    return { iso, date: parseDate(iso), start, end, minutes, places, works, text, meal, ditto, auto, over };
+    return { iso, date: parseDate(iso), start, end, minutes, places, works, text, meal, auto, over };
   });
 }
 const tripTotal = (rows) => rows.reduce((t, r) => t + r.meal, 0);
@@ -1570,7 +1566,6 @@ function tripDayHTML(r) {
         .join('')}
       <div class="trip-field"><span class="field-icon">${ICON.pin}</span><textarea class="trip-text" data-t="places" rows="1" placeholder="Reiseorte (Baustellen)" autocapitalize="sentences">${escapeHtml(r.places)}</textarea></div>
       <div class="trip-field"><span class="field-icon">${ICON.tool}</span><textarea class="trip-text" data-t="works" rows="1" placeholder="Tätigkeiten" autocapitalize="sentences">${escapeHtml(r.works)}</textarea></div>
-      <p class="trip-ditto muted" ${r.ditto ? '' : 'hidden'}>Gleicher Text wie darüber – im PDF steht „〃“.</p>
     </div>
     <div class="day-foot">
       <span>Verpflegung</span>
@@ -3132,12 +3127,6 @@ document.addEventListener('input', (e) => {
       trip.over[iso] = o;
       saveTrips(trip);
       fitTextarea(t);
-      // „〃“-Hinweise der Tage passen sich an
-      const rows = tripRows(trip);
-      document.querySelectorAll('.trip-day').forEach((el) => {
-        const r = rows.find((x) => x.iso === el.dataset.date);
-        if (r) el.querySelector('.trip-ditto').hidden = !r.ditto;
-      });
     } else {
       const v = parseFloat(t.value.replace(',', '.'));
       setTripOver(trip, iso, 'meal', Number.isNaN(v) ? 0 : Math.max(0, v));
