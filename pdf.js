@@ -82,34 +82,6 @@ class PdfDoc {
     const top = y + (h - lines.length * lineH) / 2;
     lines.forEach((l, i) => this.textBox(l, x, top + i * lineH, w, lineH, s, true, 'center'));
   }
-  // Wie textBox, aber zu langer Text wird zuerst auf zwei Zeilen umbrochen, bevor er schrumpft.
-  wrapBox(str, x, y, w, h, size, gray = 0) {
-    const t = String(str ?? '').trim();
-    if (!t) return;
-    if (measureText(t, size, false) <= w) return this.textBox(t, x, y, w, h, size, false, 'left', gray);
-    let s = Math.min(size, (h - 2) / 2.3);
-    const words = t.split(/\s+/);
-    const split = (sz) => {
-      let first = '';
-      let i = 0;
-      while (i < words.length) {
-        const next = first ? `${first} ${words[i]}` : words[i];
-        if (measureText(next, sz, false) > w && first) break;
-        first = next;
-        i++;
-      }
-      return [first, words.slice(i).join(' ')];
-    };
-    let lines = split(s);
-    while (s > 5.5 && (measureText(lines[0], s, false) > w || measureText(lines[1], s, false) > w)) {
-      s -= 0.25;
-      lines = split(s);
-    }
-    if (2.2 * s > h) return this.textBox(t, x, y, w, h, size, false, 'left', gray);
-    const lineH = s * 1.1;
-    const top = y + (h - 2 * lineH) / 2;
-    lines.forEach((l, i) => this.textBox(l, x, top + i * lineH, w, lineH, s, false, 'left', gray));
-  }
   output(info) {
     const content = this.ops.join('\n');
     const objects = [
@@ -174,8 +146,50 @@ function buildTimesheetPdf(sheet, overtimeTarget) {
   const rowsOnPdf = (d, i) =>
     holidayWork(d) ? Math.max(d.rows.length + 1, pdfMinRows(i)) : d.status ? pdfMinRows(i) : Math.max(d.rows.length, pdfMinRows(i));
   const rowCount = sheet.days.reduce((n, d, i) => n + rowsOnPdf(d, i), 0);
-  const rowH = Math.min(28, (bottom - tableTop - headerH) / Math.max(rowCount, 1));
+  const avail = bottom - tableTop - headerH;
+  let rowH = Math.min(28, avail / Math.max(rowCount, 1));
   const fs = Math.max(5, Math.min(9.5, rowH * 0.48));
+  const siteW = xs[6] - xs[5] - 6;
+  const workW = xs[7] - xs[6] - 6;
+
+  // Baustelle / Art der Arbeit: überall dieselbe Schriftgröße (zwei Zeilen passen in eine normale Zeile).
+  // Braucht ein Eintrag mehr, wird die Zeile höher (höchstens drei Textzeilen); reicht das nicht, eine Stufe
+  // kleiner (85 %); erst danach – nur bei eingelesenen, sehr langen Texten – weiter verkleinert.
+  const TEXT = Math.min(fs, (rowH - 3) / 2.3);
+  const SMALL = TEXT * 0.85;
+  const fitText = (text, w) => {
+    const t = String(text ?? '').trim();
+    if (!t) return { size: TEXT, lines: [] };
+    for (const size of [TEXT, SMALL]) {
+      const lines = wrapLines(t, w, size);
+      if (lines.length <= 3) return { size, lines };
+    }
+    let size = SMALL;
+    let lines = wrapLines(t, w, size);
+    while (size > 4 && lines.length > 3) lines = wrapLines(t, w, (size -= 0.25));
+    return { size, lines: lines.slice(0, 3) };
+  };
+  const texts = new Map(); // Zeile → { site, work }
+  for (const d of sheet.days) for (const r of d.rows) texts.set(r, { site: fitText(r.site, siteW), work: fitText(r.work, workW) });
+  const need = (r) => {
+    const { site, work } = texts.get(r);
+    const h = Math.max(site.lines.length * site.size, work.lines.length * work.size) * 1.12 + 4;
+    return Math.max(rowH, h);
+  };
+  const heightsOf = (day, i) => {
+    const hs = Array(rowsOnPdf(day, i)).fill(rowH);
+    const active = sheetIsActive(sheet, i);
+    const hw = active && holidayWork(day);
+    if (active && (!day.status || hw)) day.rows.forEach((r, k) => (hs[hw ? k + 1 : k] = need(r)));
+    return hs;
+  };
+  // Mehrhöhe einzelner Zeilen von den übrigen abziehen, damit alles auf die Seite passt
+  for (let k = 0; k < 4; k++) {
+    const used = sheet.days.reduce((t, d, i) => t + heightsOf(d, i).reduce((a, b) => a + b, 0), 0);
+    const extra = used - rowCount * rowH;
+    if (!extra) break;
+    rowH = Math.min(28, (avail - extra) / rowCount);
+  }
 
   // Tabellenkopf
   doc.fill(left, tableTop, width, headerH, 0.75);
@@ -195,11 +209,18 @@ function buildTimesheetPdf(sheet, overtimeTarget) {
     { c: 5, align: 'left' },
     { c: 6, align: 'left' },
   ];
+  /** Vorbereiteter Text (fitText) senkrecht mittig in der Zelle */
+  const drawText = ({ size, lines }, x, y, w, h) => {
+    const lineH = size * 1.12;
+    const top = y + Math.max(1, (h - lines.length * lineH) / 2);
+    lines.forEach((l, i) => doc.textBox(l, x, top + i * lineH, w, lineH, size, false, 'left'));
+  };
   let y = tableTop + headerH;
   const dayTops = [];
   sheet.days.forEach((day, i) => {
-    const n = rowsOnPdf(day, i);
-    const h = n * rowH;
+    const hs = heightsOf(day, i);
+    const tops = hs.map((_, k) => y + hs.slice(0, k).reduce((a, b) => a + b, 0));
+    const h = hs.reduce((a, b) => a + b, 0);
     const active = sheetIsActive(sheet, i);
     const status = active ? day.status : null;
     const hw = active && holidayWork(day);
@@ -208,11 +229,10 @@ function buildTimesheetPdf(sheet, overtimeTarget) {
     doc.fill(xs[0], y, xs[1] - xs[0], h, 0.87);
     if (!active) doc.fill(xs[1], y, right - xs[1], h, 0.93);
 
-    for (let r = 1; r < n; r++) {
-      const ly = y + r * rowH;
+    for (let r = 1; r < hs.length; r++) {
       for (const { c } of textCols) {
         if (status && !hw && c === 5) continue; // Spalte „Baustelle“ bleibt für den Text frei
-        doc.line(xs[c], ly, xs[c + 1], ly, 0.4, 0.78);
+        doc.line(xs[c], tops[r], xs[c + 1], tops[r], 0.4, 0.78);
       }
     }
 
@@ -227,19 +247,20 @@ function buildTimesheetPdf(sheet, overtimeTarget) {
         doc.textBox(DAY_STATUS_SHORT[status], xs[5] + 3, y, xs[6] - xs[5] - 6, rowH, fs, true);
       }
       day.rows.forEach((row, r) => {
-        const ry = y + (hw ? r + 1 : r) * rowH;
+        const k = hw ? r + 1 : r;
+        const ry = tops[k];
         const cell = (c, text, align) => doc.textBox(text, xs[c] + 3, ry, xs[c + 1] - xs[c] - 6, rowH, fs, false, align);
         if (row.start != null) cell(1, fmtTime(row.start), 'right');
         if (row.end != null) cell(2, fmtTime(row.end), 'right');
         const m = rowMinutes(row);
         if (m != null) cell(3, fmtHours(m), 'right');
-        doc.wrapBox(row.site, xs[5] + 3, ry, xs[6] - xs[5] - 6, rowH, fs);
-        doc.wrapBox(row.work, xs[6] + 3, ry, xs[7] - xs[6] - 6, rowH, fs);
+        drawText(texts.get(row).site, xs[5] + 3, ry, siteW, hs[k]);
+        drawText(texts.get(row).work, xs[6] + 3, ry, workW, hs[k]);
       });
       const first = (c, text) => doc.textBox(text, xs[c] + 3, y, xs[c + 1] - xs[c] - 6, rowH, fs, false, 'right');
       if (day.pause != null && (day.pause > 0 || dayHasTimes(day))) {
         // Pause gehört zur Arbeit: am Feiertag in die erste Arbeitszeile
-        doc.textBox(fmtHours(day.pause), xs[4] + 3, hw ? y + rowH : y, xs[5] - xs[4] - 6, rowH, fs, false, 'right');
+        doc.textBox(fmtHours(day.pause), xs[4] + 3, hw ? tops[1] : y, xs[5] - xs[4] - 6, rowH, fs, false, 'right');
       }
       first(7, fmtHours(dayTotal(day)));
     }

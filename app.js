@@ -44,6 +44,8 @@ const uid = () =>
 const sameKey = (s) => String(s ?? '').trim().toLowerCase().replace(/[’‘`´ʼ′]/g, "'");
 /** Suche: zusätzlich ohne Apostrophe, Leerzeichen, Kommas, Bindestriche und Punkte („Bäckerseck“ findet „Bäcker's Eck“) */
 const searchKey = (s) => sameKey(s).replace(/['\s,.\-–]/g, '');
+/** Höchstlängen, damit der Text im PDF in drei Zeilen der kleineren Schriftstufe passt (ohne Zähler) */
+const MAX_LEN = { site: 60, work: 100 };
 const escapeHtml = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
@@ -813,10 +815,7 @@ function renderEditor(id) {
     </header>
     <div id="days">${daysHTML(s)}</div>
     <div class="sum-bar" id="summary">${summaryHTML(s)}</div>
-    <button class="pv-thumb" data-act="pdf-preview" aria-label="PDF-Vorschau vergrößern">
-      <img id="pdf-thumb" alt="">
-      <span><b>PDF-Vorschau</b><span class="muted">So sieht der Zettel als PDF aus. Antippen zum Vergrößern.</span></span>
-    </button>`;
+    ${pdfThumbHTML('Zettel')}`;
   updatePdfThumb(true);
 }
 
@@ -942,9 +941,9 @@ function rowHTML(day, r) {
       <span class="row-hours">${m == null ? '' : fmtH(m)}</span>
       ${rowCount > 1 ? `<button class="row-del" data-act="delrow" aria-label="Zeile löschen">${ICON.close}</button>` : '<span class="row-del-space"></span>'}
     </div>
-    <div class="suggest-wrap ${fieldMissing(day, r, 'site') ? 'missing' : ''}"><span class="field-icon">${ICON.pin}</span><span class="warn" aria-label="fehlt">⚠️</span><input class="txt" data-f="site" placeholder="Ort" value="${escapeHtml(r.site)}" autocomplete="off" autocapitalize="sentences" enterkeyhint="next"></div>
+    <div class="suggest-wrap ${fieldMissing(day, r, 'site') ? 'missing' : ''}"><span class="field-icon">${ICON.pin}</span><span class="warn" aria-label="fehlt">⚠️</span><input class="txt" data-f="site" placeholder="Ort" maxlength="${MAX_LEN.site}" value="${escapeHtml(r.site)}" autocomplete="off" autocapitalize="sentences" enterkeyhint="next"></div>
     ${typoHintHTML('site', r)}
-    <div class="suggest-wrap ${fieldMissing(day, r, 'work') ? 'missing' : ''}"><span class="field-icon">${ICON.tool}</span><span class="warn" aria-label="fehlt">⚠️</span><input class="txt" data-f="work" placeholder="Arbeit" value="${escapeHtml(r.work)}" autocomplete="off" autocapitalize="sentences" enterkeyhint="done"></div>
+    <div class="suggest-wrap ${fieldMissing(day, r, 'work') ? 'missing' : ''}"><span class="field-icon">${ICON.tool}</span><span class="warn" aria-label="fehlt">⚠️</span><input class="txt" data-f="work" placeholder="Arbeit" maxlength="${MAX_LEN.work}" value="${escapeHtml(r.work)}" autocomplete="off" autocapitalize="sentences" enterkeyhint="done"></div>
     ${typoHintHTML('work', r)}
   </div>`;
 }
@@ -1108,8 +1107,8 @@ function pdfFileFor(s) {
 }
 
 // ───────────────────────── PDF-Vorschau ─────────────────────────
-// Am Ende des Zettels eine kleine Vorschau des PDFs (iOS zeigt PDFs direkt als Bild an); Antippen öffnet sie groß.
-// Senden geht bewusst nicht aus der Vorschau heraus.
+// Am Ende des Zettels bzw. der Reisekostenabrechnung eine kleine Vorschau des PDFs (iOS zeigt PDFs direkt als Bild an);
+// Antippen öffnet sie groß. Senden geht bewusst nicht aus der Vorschau heraus.
 
 let pdfUrl = null;
 let pdfThumbTimer = 0;
@@ -1117,16 +1116,28 @@ let pdfThumbTimer = 0;
 function updatePdfThumb(now = false) {
   clearTimeout(pdfThumbTimer);
   const run = () => {
-    const s = currentSheet();
     const img = document.getElementById('pdf-thumb');
-    if (!s || !img) return;
+    if (!img) return;
+    let file = null;
+    if (currentView === 'trip') {
+      const t = currentTrip();
+      if (t && t.dates.length) file = tripPdfFile(t);
+    } else if (currentSheet()) file = pdfFileFor(currentSheet());
+    // Abrechnung ohne Reisetage: noch keine Vorschau
+    img.closest('.pv-thumb').hidden = !file;
+    if (!file) return;
     if (pdfUrl) URL.revokeObjectURL(pdfUrl);
-    pdfUrl = URL.createObjectURL(buildTimesheetPdf(s, sheetTarget(s)));
+    pdfUrl = URL.createObjectURL(file);
     img.src = pdfUrl;
   };
   if (now) run();
   else pdfThumbTimer = setTimeout(run, 400);
 }
+
+const pdfThumbHTML = (what, wide = false) => `<button class="pv-thumb ${wide ? 'wide' : ''}" data-act="pdf-preview" aria-label="PDF-Vorschau vergrößern">
+      <img id="pdf-thumb" alt="">
+      <span><b>PDF-Vorschau</b><span class="muted">So sieht ${what === 'Zettel' ? 'der Zettel' : 'die Abrechnung'} als PDF aus. Antippen zum Vergrößern.</span></span>
+    </button>`;
 
 /** Große Vorschau: Seite auf Breite, Doppeltipp oder zwei Finger zum Vergrößern */
 function openPdfPreview() {
@@ -1229,6 +1240,7 @@ let tripId = null;
 
 function saveTrips(changed) {
   if (changed) changed.updatedAt = Date.now();
+  if (currentView === 'trip') updatePdfThumb();
   try {
     localStorage.setItem(TRIP_KEY, JSON.stringify(trips));
   } catch {
@@ -1482,8 +1494,10 @@ function renderTrip(id) {
         <button class="nav-btn" data-act="trip-more" aria-label="Weitere Aktionen">${ICON.more}</button>
       </span>
     </header>
-    <div id="trip-body">${tripBodyHTML(t)}</div>`;
+    <div id="trip-body">${tripBodyHTML(t)}</div>
+    ${pdfThumbHTML('Abrechnung', true)}`;
   fitTripTexts();
+  updatePdfThumb(true);
 }
 
 /** Textfelder so hoch wie ihr Text (auch nach dem Öffnen und beim Drehen des Geräts) */
@@ -2843,8 +2857,10 @@ function pickChip(text) {
     if (last && isKnown('work', last)) done.push(last);
     else if (last && !searchKey(text).includes(searchKey(last))) done.push(last);
     done.push(text);
+    // Passt der Vorschlag nicht mehr in die Zeile (Zeichengrenze), wird er nicht angehängt
+    if (done.join(', ').length > MAX_LEN.work) return toast('Kein Platz mehr in dieser Zeile');
     // Komma und Leerzeichen gleich mitsetzen, damit direkt weitergeschrieben werden kann
-    input.value = `${done.join(', ')}, `;
+    input.value = `${done.join(', ')}, `.slice(0, MAX_LEN.work);
     input.dispatchEvent(new Event('input', { bubbles: true }));
   } else {
     input.value = text;

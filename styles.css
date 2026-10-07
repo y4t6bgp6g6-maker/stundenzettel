@@ -993,6 +993,8 @@ button.nav-title { font-size: 17px; }
 .pv-thumb { display: flex; align-items: center; gap: 14px; width: 100%; margin-top: 16px; padding: 12px; border-radius: 16px; background: var(--card); text-align: left; }
 .pv-thumb:active { background: var(--fill); }
 .pv-thumb img { flex: none; width: 92px; aspect-ratio: 595 / 842; border-radius: 4px; background: #fff; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2); }
+.pv-thumb.wide img { width: 124px; aspect-ratio: 842 / 595; }
+.pv-thumb[hidden] { display: none; }
 .pv-thumb b { display: block; font-size: 17px; }
 .pv-thumb .muted { font-size: 14px; }
 .modal.pv-modal { top: 0; max-width: none; display: flex; flex-direction: column; background: var(--bg); }
