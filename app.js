@@ -1170,6 +1170,9 @@ function openPdfPreview() {
   let s = 1;
   let tx = PAD;
   let ty = PAD;
+  // Gezeichnete Größe: Während der Geste wird nur per transform skaliert (flüssig, aber unscharf);
+  // danach zeichnet iOS die Seite in der neuen Größe neu (scharf), siehe sharpen()
+  let drawn = 1;
 
   // Grenzen: kleiner als der Ausschnitt → waagerecht mittig, oben bündig; größer → kein Rand ins Leere ziehen
   const bounds = (scale) => {
@@ -1180,14 +1183,24 @@ function openPdfPreview() {
     return { x, y };
   };
   const clampTo = (v, [a, b]) => Math.min(b, Math.max(a, v));
-  const apply = () => (page.style.transform = `translate3d(${tx}px, ${ty}px, 0) scale(${s})`);
+  const apply = () => (page.style.transform = `translate3d(${tx}px, ${ty}px, 0) scale(${s / drawn})`);
+  let sharpTimer = 0;
+  const sharpen = () => {
+    clearTimeout(sharpTimer);
+    sharpTimer = setTimeout(() => {
+      if (g || Math.abs(drawn - s) < 0.01) return;
+      drawn = s;
+      page.style.width = `${w0 * s}px`;
+      apply();
+    }, 120);
+  };
   const layout = () => {
     vw = box.clientWidth;
     vh = box.clientHeight;
     w0 = vw - 2 * PAD;
     const ratio = page.naturalWidth ? page.naturalHeight / page.naturalWidth : wide ? 595 / 842 : 842 / 595;
     h0 = w0 * ratio;
-    page.style.width = `${w0}px`;
+    page.style.width = `${w0 * drawn}px`;
     const b = bounds(s);
     tx = clampTo(tx, b.x);
     ty = clampTo(ty, b.y);
@@ -1212,6 +1225,7 @@ function openPdfPreview() {
       ty = y1 + (ny - y1) * e;
       apply();
       if (k < 1) anim = requestAnimationFrame(step);
+      else sharpen();
     };
     anim = requestAnimationFrame(step);
   };
@@ -1226,6 +1240,7 @@ function openPdfPreview() {
     nx = clampTo(nx, b.x);
     ny = clampTo(ny, b.y);
     if (ns !== s || nx !== tx || ny !== ty) animateTo(ns, nx, ny);
+    else sharpen();
   };
 
   // Touch: ein Finger zieht, zwei Finger zoomen (Punkt zwischen den Fingern bleibt unter den Fingern)
