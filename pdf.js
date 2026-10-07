@@ -167,7 +167,7 @@ function buildTimesheetPdf(sheet, overtimeTarget) {
   // Größen so wählen, dass die Tabelle die Seite füllt
   const tableTop = 118;
   const headerH = 26;
-  const footerH = overtimeTarget == null ? 28 : 46;
+  const footerH = overtimeTarget == null ? 28 : 78;
   const bottom = PDF_H - 36 - footerH;
   // Mo–Fr mindestens 5 Zeilen, Sa/So mindestens 1; Krankheit/Urlaub usw. nur die Mindestzeilen;
   // Feiertag mit Arbeit (Notdienst): eine Zeile „Feiertag“, darunter die Arbeitszeilen
@@ -254,15 +254,24 @@ function buildTimesheetPdf(sheet, overtimeTarget) {
   doc.line(left, tableBottom, right, tableBottom, 0.8, BLACK);
   xs.forEach((x) => doc.line(x, tableTop, x, tableBottom, 0.6, BLACK));
 
-  // Summen
+  // Summen: Stunden (ohne Überstunden), Überstunden; darunter abgesetzt „Stunden Gesamt“ mit Strich und grau hinterlegt
+  const total = sheetTotal(sheet);
+  const sumRow = (label, value, y, bold) => {
+    doc.textBox(label, xs[5], y, xs[7] - xs[5] - 6, 14, 10, bold, 'right');
+    doc.textBox(value, xs[7] + 3, y, xs[8] - xs[7] - 6, 14, 10, bold, 'right');
+  };
   let fy = tableBottom + 8;
-  doc.textBox('Stunden Gesamt:', xs[5], fy, xs[7] - xs[5] - 6, 14, 10, true, 'right');
-  doc.textBox(fmtHours(sheetTotal(sheet)), xs[7] + 3, fy, xs[8] - xs[7] - 6, 14, 10, true, 'right');
   if (overtimeTarget != null) {
-    fy += 18;
-    doc.textBox('davon Überstunden:', xs[5], fy, xs[7] - xs[5] - 6, 14, 10, true, 'right');
-    doc.textBox(fmtHours(sheetOvertime(sheet, overtimeTarget)), xs[7] + 3, fy, xs[8] - xs[7] - 6, 14, 10, true, 'right');
+    const over = sheetOvertime(sheet, overtimeTarget);
+    sumRow('Stunden:', fmtHours(total - over), fy, false);
+    fy += 16;
+    sumRow('Überstunden:', fmtHours(over), fy, false);
+    fy += 21;
+    doc.fill(xs[6] + 20, fy - 2, right - xs[6] - 20, 18, 0.87);
+    doc.line(xs[6] + 20, fy - 2, right, fy - 2, 0.8, BLACK);
+    fy += 0.5;
   }
+  sumRow('Stunden Gesamt:', fmtHours(total), fy, true);
 
   return doc.output({ title: sheetTitle(sheet), author: sheet.name });
 }

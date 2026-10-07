@@ -988,3 +988,15 @@ button.nav-title { font-size: 17px; }
 .ov-bar i.plus { background: var(--success); }
 .ov-bar i.minus { background: var(--danger); }
 .ov-m-val { text-align: right; font-variant-numeric: tabular-nums; font-size: 15px; }
+
+/* PDF-Vorschau: klein am Ende des Zettels, groß als eigene Seite */
+.pv-thumb { display: flex; align-items: center; gap: 14px; width: 100%; margin-top: 16px; padding: 12px; border-radius: 16px; background: var(--card); text-align: left; }
+.pv-thumb:active { background: var(--fill); }
+.pv-thumb img { flex: none; width: 92px; aspect-ratio: 595 / 842; border-radius: 4px; background: #fff; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2); }
+.pv-thumb b { display: block; font-size: 17px; }
+.pv-thumb .muted { font-size: 14px; }
+.modal.pv-modal { top: 0; max-width: none; display: flex; flex-direction: column; background: var(--bg); }
+.pv-head { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: calc(env(safe-area-inset-top) + 6px) 8px 6px 16px; }
+.pv-head b { font-size: 17px; }
+.pv-scroll { flex: 1; overflow: auto; overscroll-behavior: contain; padding: 8px 12px calc(16px + env(safe-area-inset-bottom)); touch-action: pan-x pan-y; }
+.pv-page { display: block; width: 100%; max-width: none; background: #fff; border-radius: 6px; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.18); }

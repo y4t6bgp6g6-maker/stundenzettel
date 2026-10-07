@@ -812,7 +812,12 @@ function renderEditor(id) {
       <div class="daybar" id="daybar">${dayBarHTML(s)}</div>
     </header>
     <div id="days">${daysHTML(s)}</div>
-    <div class="sum-bar" id="summary">${summaryHTML(s)}</div>`;
+    <div class="sum-bar" id="summary">${summaryHTML(s)}</div>
+    <button class="pv-thumb" data-act="pdf-preview" aria-label="PDF-Vorschau vergrößern">
+      <img id="pdf-thumb" alt="">
+      <span><b>PDF-Vorschau</b><span class="muted">So sieht der Zettel als PDF aus. Antippen zum Vergrößern.</span></span>
+    </button>`;
+  updatePdfThumb(true);
 }
 
 /** Kurze Stundenangabe für die Tagesleiste: „9,5“ */
@@ -959,6 +964,7 @@ function refreshDay(i) {
   refreshSummary();
 }
 function refreshSummary() {
+  updatePdfThumb();
   const s = currentSheet();
   const el = document.getElementById('summary');
   if (el) el.innerHTML = summaryHTML(s);
@@ -1099,6 +1105,73 @@ function askDelete(id, leave, onCancel = null) {
 function pdfFileFor(s) {
   const blob = buildTimesheetPdf(s, sheetTarget(s));
   return new File([blob], `${sheetTitle(s)}.pdf`, { type: 'application/pdf' });
+}
+
+// ───────────────────────── PDF-Vorschau ─────────────────────────
+// Am Ende des Zettels eine kleine Vorschau des PDFs (iOS zeigt PDFs direkt als Bild an); Antippen öffnet sie groß.
+// Senden geht bewusst nicht aus der Vorschau heraus.
+
+let pdfUrl = null;
+let pdfThumbTimer = 0;
+/** Vorschau neu erzeugen – nach Änderungen kurz gewartet, damit nicht bei jedem Tastendruck ein PDF entsteht */
+function updatePdfThumb(now = false) {
+  clearTimeout(pdfThumbTimer);
+  const run = () => {
+    const s = currentSheet();
+    const img = document.getElementById('pdf-thumb');
+    if (!s || !img) return;
+    if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+    pdfUrl = URL.createObjectURL(buildTimesheetPdf(s, sheetTarget(s)));
+    img.src = pdfUrl;
+  };
+  if (now) run();
+  else pdfThumbTimer = setTimeout(run, 400);
+}
+
+/** Große Vorschau: Seite auf Breite, Doppeltipp oder zwei Finger zum Vergrößern */
+function openPdfPreview() {
+  updatePdfThumb(true);
+  const modal = openModal(
+    `<div class="pv-head"><span></span><b>Vorschau</b><button class="modal-btn strong" data-m="ok">Fertig</button></div>
+    <div class="pv-scroll"><img class="pv-page" src="${pdfUrl}" alt="PDF-Vorschau"></div>`,
+    'pv-modal'
+  );
+  const box = modal.querySelector('.pv-scroll');
+  const page = modal.querySelector('.pv-page');
+  let zoom = 1;
+  const setZoom = (z, cx = box.clientWidth / 2, cy = box.clientHeight / 2) => {
+    z = Math.min(4, Math.max(1, z));
+    // Punkt unter den Fingern bleibt an seiner Stelle
+    const fx = (box.scrollLeft + cx) / page.offsetWidth;
+    const fy = (box.scrollTop + cy) / page.offsetHeight;
+    zoom = z;
+    page.style.width = `${z * 100}%`;
+    box.scrollLeft = fx * page.offsetWidth - cx;
+    box.scrollTop = fy * page.offsetHeight - cy;
+  };
+  let lastTap = 0;
+  page.addEventListener('click', (e) => {
+    const now = Date.now();
+    if (now - lastTap < 320) {
+      const r = box.getBoundingClientRect();
+      setZoom(zoom > 1 ? 1 : 2.5, e.clientX - r.left, e.clientY - r.top);
+      lastTap = 0;
+    } else lastTap = now;
+  });
+  let startZoom = 1;
+  box.addEventListener('gesturestart', (e) => {
+    e.preventDefault();
+    startZoom = zoom;
+  });
+  box.addEventListener('gesturechange', (e) => {
+    e.preventDefault();
+    const r = box.getBoundingClientRect();
+    setZoom(startZoom * e.scale, e.clientX - r.left, e.clientY - r.top);
+  });
+  box.addEventListener('gestureend', (e) => e.preventDefault());
+  modal.addEventListener('click', (e) => {
+    if (e.target.closest('[data-m="ok"]')) closeModal();
+  });
 }
 
 function downloadFile(file) {
@@ -2907,6 +2980,9 @@ document.addEventListener('click', (e) => {
       el.closest('.typo-hint').remove();
       break;
     }
+    case 'pdf-preview':
+      openPdfPreview();
+      break;
     case 'delrow': {
       const { s, dayIndex, day, rowIndex, row } = rowContext(el);
       const remove = () => {
