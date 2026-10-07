@@ -1144,49 +1144,212 @@ const pdfThumbHTML = (what, wide = false) => `<button class="pv-thumb ${wide ? '
       <span><b>PDF-Vorschau</b><span class="muted">So sieht ${what === 'Zettel' ? 'der Zettel' : 'die Abrechnung'} als PDF aus. Antippen zum Vergrößern.</span></span>
     </button>`;
 
-/** Große Vorschau: Seite auf Breite, Doppeltipp oder zwei Finger zum Vergrößern */
+/**
+ * Große Vorschau: Seite auf Breite. Zoomen (zwei Finger, Doppeltipp) und Ziehen (ein Finger, mit Schwung) laufen
+ * komplett über eigene Touch-Steuerung per transform – kein Scrollen des Browsers dazwischen, daher kein Zittern.
+ */
 function openPdfPreview() {
   updatePdfThumb(true);
+  const wide = currentView === 'trip'; // Reisekosten: A4 quer
   const modal = openModal(
     `<div class="pv-head"><span></span><b>Vorschau</b><button class="modal-btn strong" data-m="ok">Fertig</button></div>
-    <div class="pv-scroll"><img class="pv-page" src="${pdfUrl}" alt="PDF-Vorschau"></div>`,
+    <div class="pv-scroll"><img class="pv-page" src="${pdfUrl}" alt="PDF-Vorschau" draggable="false"></div>`,
     'pv-modal'
   );
-  const box = modal.querySelector('.pv-scroll');
-  const page = modal.querySelector('.pv-page');
-  let zoom = 1;
-  const setZoom = (z, cx = box.clientWidth / 2, cy = box.clientHeight / 2) => {
-    z = Math.min(4, Math.max(1, z));
-    // Punkt unter den Fingern bleibt an seiner Stelle
-    const fx = (box.scrollLeft + cx) / page.offsetWidth;
-    const fy = (box.scrollTop + cy) / page.offsetHeight;
-    zoom = z;
-    page.style.width = `${z * 100}%`;
-    box.scrollLeft = fx * page.offsetWidth - cx;
-    box.scrollTop = fy * page.offsetHeight - cy;
-  };
-  let lastTap = 0;
-  page.addEventListener('click', (e) => {
-    const now = Date.now();
-    if (now - lastTap < 320) {
-      const r = box.getBoundingClientRect();
-      setZoom(zoom > 1 ? 1 : 2.5, e.clientX - r.left, e.clientY - r.top);
-      lastTap = 0;
-    } else lastTap = now;
-  });
-  let startZoom = 1;
-  box.addEventListener('gesturestart', (e) => {
-    e.preventDefault();
-    startZoom = zoom;
-  });
-  box.addEventListener('gesturechange', (e) => {
-    e.preventDefault();
-    const r = box.getBoundingClientRect();
-    setZoom(startZoom * e.scale, e.clientX - r.left, e.clientY - r.top);
-  });
-  box.addEventListener('gestureend', (e) => e.preventDefault());
   modal.addEventListener('click', (e) => {
     if (e.target.closest('[data-m="ok"]')) closeModal();
+  });
+  const box = modal.querySelector('.pv-scroll');
+  const page = modal.querySelector('.pv-page');
+  const PAD = 12;
+  const MAX = 4;
+  let vw = 0;
+  let vh = 0;
+  let w0 = 0; // Seitenbreite bei Zoom 1
+  let h0 = 0;
+  let s = 1;
+  let tx = PAD;
+  let ty = PAD;
+
+  // Grenzen: kleiner als der Ausschnitt → waagerecht mittig, oben bündig; größer → kein Rand ins Leere ziehen
+  const bounds = (scale) => {
+    const w = w0 * scale;
+    const h = h0 * scale;
+    const x = w + 2 * PAD <= vw ? [(vw - w) / 2, (vw - w) / 2] : [vw - w - PAD, PAD];
+    const y = h + 2 * PAD <= vh ? [PAD, PAD] : [vh - h - PAD, PAD];
+    return { x, y };
+  };
+  const clampTo = (v, [a, b]) => Math.min(b, Math.max(a, v));
+  const apply = () => (page.style.transform = `translate3d(${tx}px, ${ty}px, 0) scale(${s})`);
+  const layout = () => {
+    vw = box.clientWidth;
+    vh = box.clientHeight;
+    w0 = vw - 2 * PAD;
+    const ratio = page.naturalWidth ? page.naturalHeight / page.naturalWidth : wide ? 595 / 842 : 842 / 595;
+    h0 = w0 * ratio;
+    page.style.width = `${w0}px`;
+    const b = bounds(s);
+    tx = clampTo(tx, b.x);
+    ty = clampTo(ty, b.y);
+    apply();
+  };
+  page.addEventListener('load', layout);
+  requestAnimationFrame(layout);
+  const onResize = () => (box.isConnected ? layout() : window.removeEventListener('resize', onResize));
+  window.addEventListener('resize', onResize);
+
+  /** Weich zu einem Zustand gleiten (nach dem Loslassen, Doppeltipp) */
+  let anim = 0;
+  const animateTo = (ns, nx, ny) => {
+    cancelAnimationFrame(anim);
+    const [s1, x1, y1] = [s, tx, ty];
+    const t0 = performance.now();
+    const step = (now) => {
+      const k = Math.min(1, (now - t0) / 220);
+      const e = 1 - (1 - k) ** 3;
+      s = s1 + (ns - s1) * e;
+      tx = x1 + (nx - x1) * e;
+      ty = y1 + (ny - y1) * e;
+      apply();
+      if (k < 1) anim = requestAnimationFrame(step);
+    };
+    anim = requestAnimationFrame(step);
+  };
+  const settle = () => {
+    const ns = Math.min(MAX, Math.max(1, s));
+    // Beim Zurückfedern des Zooms bleibt die Mitte des Ausschnitts an ihrer Stelle
+    const cx = vw / 2;
+    const cy = vh / 2;
+    let nx = cx - ((cx - tx) / s) * ns;
+    let ny = cy - ((cy - ty) / s) * ns;
+    const b = bounds(ns);
+    nx = clampTo(nx, b.x);
+    ny = clampTo(ny, b.y);
+    if (ns !== s || nx !== tx || ny !== ty) animateTo(ns, nx, ny);
+  };
+
+  // Touch: ein Finger zieht, zwei Finger zoomen (Punkt zwischen den Fingern bleibt unter den Fingern)
+  let g = null;
+  let vel = { x: 0, y: 0, t: 0 };
+  let lastTap = { t: 0, x: 0, y: 0 };
+  const pt = (e, i) => {
+    const r = box.getBoundingClientRect();
+    return { x: e.touches[i].clientX - r.left, y: e.touches[i].clientY - r.top };
+  };
+  const start = (e) => {
+    cancelAnimationFrame(anim);
+    if (e.touches.length >= 2) {
+      const a = pt(e, 0);
+      const b = pt(e, 1);
+      g = { pinch: true, d: Math.hypot(a.x - b.x, a.y - b.y) || 1, m: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, s, tx, ty, moved: true };
+    } else {
+      const a = pt(e, 0);
+      g = { pinch: false, x: a.x, y: a.y, tx, ty, sx: a.x, sy: a.y, moved: false };
+      vel = { x: 0, y: 0, t: performance.now() };
+    }
+  };
+  box.addEventListener(
+    'touchstart',
+    (e) => {
+      e.preventDefault();
+      start(e);
+    },
+    { passive: false }
+  );
+  box.addEventListener(
+    'touchmove',
+    (e) => {
+      e.preventDefault();
+      if (!g) return;
+      if (g.pinch && e.touches.length >= 2) {
+        const a = pt(e, 0);
+        const b = pt(e, 1);
+        const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        // Über die Grenzen hinaus nur gedämpft
+        let ns = (g.s * Math.hypot(a.x - b.x, a.y - b.y)) / g.d;
+        if (ns > MAX) ns = MAX + (ns - MAX) * 0.3;
+        if (ns < 1) ns = 1 - (1 - ns) * 0.3;
+        tx = m.x - ((g.m.x - g.tx) / g.s) * ns;
+        ty = m.y - ((g.m.y - g.ty) / g.s) * ns;
+        s = ns;
+        apply();
+      } else if (!g.pinch) {
+        const a = pt(e, 0);
+        if (Math.hypot(a.x - g.sx, a.y - g.sy) > 6) g.moved = true;
+        const now = performance.now();
+        const dt = Math.max(1, now - vel.t);
+        vel = { x: (a.x - g.x) / dt, y: (a.y - g.y) / dt, t: now };
+        const b = bounds(s);
+        // Am Rand gedämpft weiterziehen
+        const soft = (v, [lo, hi]) => (v < lo ? lo - (lo - v) * 0.35 : v > hi ? hi + (v - hi) * 0.35 : v);
+        tx = soft(tx + a.x - g.x, b.x);
+        ty = soft(ty + a.y - g.y, b.y);
+        g.x = a.x;
+        g.y = a.y;
+        apply();
+      }
+    },
+    { passive: false }
+  );
+  const end = (e) => {
+    e.preventDefault();
+    if (!g) return;
+    // Von zwei auf einen Finger: nahtlos mit Ziehen weitermachen
+    if (e.touches.length === 1) {
+      const wasPinch = g.pinch;
+      start(e);
+      g.moved = wasPinch || g.moved;
+      return;
+    }
+    if (e.touches.length) return;
+    const tap = !g.pinch && !g.moved;
+    const wasPan = !g.pinch && g.moved;
+    g = null;
+    if (tap) {
+      const now = performance.now();
+      const p = { x: e.changedTouches[0].clientX - box.getBoundingClientRect().left, y: e.changedTouches[0].clientY - box.getBoundingClientRect().top };
+      if (now - lastTap.t < 320 && Math.hypot(p.x - lastTap.x, p.y - lastTap.y) < 30) {
+        // Doppeltipp: an der Stelle auf 2,5-fach, bzw. zurück auf ganze Seite
+        lastTap.t = 0;
+        const ns = s > 1.05 ? 1 : 2.5;
+        const b = bounds(ns);
+        animateTo(ns, clampTo(p.x - ((p.x - tx) / s) * ns, b.x), clampTo(p.y - ((p.y - ty) / s) * ns, b.y));
+        return;
+      }
+      lastTap = { t: now, ...p };
+      return;
+    }
+    // Schwung nach dem Ziehen
+    if (wasPan && performance.now() - vel.t < 80 && Math.hypot(vel.x, vel.y) > 0.2) {
+      let vx = vel.x * 16;
+      let vy = vel.y * 16;
+      const glide = () => {
+        const b = bounds(s);
+        tx += vx;
+        ty += vy;
+        vx *= 0.94;
+        vy *= 0.94;
+        const out = tx < b.x[0] || tx > b.x[1] || ty < b.y[0] || ty > b.y[1];
+        apply();
+        if (!out && Math.hypot(vx, vy) > 0.3) anim = requestAnimationFrame(glide);
+        else settle();
+      };
+      anim = requestAnimationFrame(glide);
+      return;
+    }
+    settle();
+  };
+  box.addEventListener('touchend', end, { passive: false });
+  box.addEventListener('touchcancel', end, { passive: false });
+  // Gesten des Browsers (Seitenzoom) innerhalb der Vorschau abfangen
+  for (const type of ['gesturestart', 'gesturechange', 'gestureend']) box.addEventListener(type, (e) => e.preventDefault());
+  // Ohne Touch (Mac): Doppelklick zoomt
+  box.addEventListener('dblclick', (e) => {
+    const r = box.getBoundingClientRect();
+    const p = { x: e.clientX - r.left, y: e.clientY - r.top };
+    const ns = s > 1.05 ? 1 : 2.5;
+    const b = bounds(ns);
+    animateTo(ns, clampTo(p.x - ((p.x - tx) / s) * ns, b.x), clampTo(p.y - ((p.y - ty) / s) * ns, b.y));
   });
 }
 
