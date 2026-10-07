@@ -728,9 +728,11 @@ function renderStats() {
     ${sheets.length ? `<p class="footnote">Überstunden: Pro Werktag zählt alles über ${fmtH(Math.round((settings.target * 60) / 5))}. Nur Tage mit Stundenzettel zählen. Plus und Minus werden verrechnet. Stunden: wie „Stunden Gesamt“ im Stundenzettel, Urlaub, Krankheit und Feiertage mit je ${fmtH(statusCredit('urlaub'))}.</p>` : ''}`;
 }
 
-/** Je Monat die gearbeiteten Stunden (Stunden Gesamt) und die Überstunden als Tabelle, neuester Monat oben */
+/** Je Monat die gearbeiteten Stunden (Stunden Gesamt) und die Überstunden als Tabelle, neuester Monat oben, darunter die Summe */
 function overtimeYearHTML(year, months) {
   const worked = overtimeAccount(true).get(year) || new Map();
+  const total = yearBalance(worked);
+  const ot = yearBalance(months);
   const rows = [...months.keys()]
     .sort((a, b) => b - a)
     .map((m) => {
@@ -745,6 +747,7 @@ function overtimeYearHTML(year, months) {
   return `<div class="card ov-months">
     <div class="ov-row ov-head"><span>Monat</span><span class="ov-n">Stunden</span><span class="ov-n">Überstunden</span></div>
     ${rows}
+    <div class="ov-row ov-sum"><span>Gesamt</span><span class="ov-n">${fmtH(total)}</span><b class="ov-n ${balanceClass(ot)}">${fmtSigned(ot)}</b></div>
   </div>`;
 }
 

@@ -983,6 +983,7 @@ button.nav-title { font-size: 17px; }
 .ov-row { display: grid; grid-template-columns: 1fr 96px 104px; align-items: center; min-height: 44px; padding: 0 16px; border-top: 0.5px solid var(--sep); font-size: 16px; }
 .ov-head { min-height: 36px; border-top: 0; font-size: 13px; font-weight: 600; color: var(--muted); }
 .ov-n { text-align: right; font-variant-numeric: tabular-nums; }
+.ov-sum { font-weight: 700; background: var(--fill); }
 
 /* PDF-Vorschau: klein am Ende des Zettels, groß als eigene Seite */
 .pv-thumb { display: flex; align-items: center; gap: 14px; width: 100%; margin-top: 16px; padding: 12px; border-radius: 16px; background: var(--card); text-align: left; }
