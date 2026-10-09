@@ -731,8 +731,7 @@ function renderStats() {
         ${account.has(y) ? overtimeYearHTML(y, account.get(y)) : ''}`;
       })
       .join('')}
-    <p class="footnote">Gezählt werden alle Tage, die du als Urlaub oder Krankheit markiert hast.</p>
-    ${sheets.length ? `<p class="footnote">Überstunden: Pro Werktag zählt alles über ${fmtH(Math.round((settings.target * 60) / 5))}. Es zählen nur Tage mit Anfangs- und Enduhrzeit oder mit Urlaub, Krank, Feiertag oder Frei. Plus und Minus werden verrechnet. Stunden: wie „Stunden Gesamt“ im Stundenzettel, Urlaub, Krankheit und Feiertage mit je ${fmtH(statusCredit('urlaub'))}.</p>` : ''}`;
+    ${sheets.length ? `<p class="footnote">Überstunden: alles über ${fmtH(Math.round((settings.target * 60) / 5))} pro Werktag.</p>` : ''}`;
 }
 
 /** Je Monat die gearbeiteten Stunden (Stunden Gesamt) und die Überstunden als Tabelle, neuester Monat oben, darunter die Summe */
@@ -1139,7 +1138,7 @@ function updatePdfThumb(now = false) {
 
 const pdfThumbHTML = (what, wide = false) => `<button class="pv-thumb ${wide ? 'wide' : ''}" data-act="pdf-preview" aria-label="PDF-Vorschau vergrößern">
       <img id="pdf-thumb" alt="">
-      <span><b>PDF-Vorschau</b><span class="muted">So sieht ${what === 'Zettel' ? 'der Zettel' : 'die Abrechnung'} als PDF aus. Antippen zum Vergrößern.</span></span>
+      <span><b>PDF-Vorschau</b><span class="muted">Antippen zum Vergrößern</span></span>
     </button>`;
 
 /**
@@ -1711,7 +1710,7 @@ function tripBodyHTML(t) {
       <button class="link-btn" data-act="trip-range" data-dir="-1">${ICON.chevronLeft} Woche davor</button>
       <button class="link-btn" data-act="trip-range" data-dir="1">Woche danach ${ICON.chevronRight}</button>
     </div>
-    <p class="footnote">Tippe die Tage an, an denen du unterwegs warst.</p>
+    <p class="footnote">Reisetage antippen.</p>
     ${rows.map(tripDayHTML).join('')}
     ${
       rows.length
@@ -2055,15 +2054,15 @@ function renderSettings() {
           : `<button class="list-btn" data-act="sign">Unterschrift hinzufügen …</button>`
       }
     </div>
-    <p class="footnote">Ort und Unterschrift stehen unten auf der Reisekostenabrechnung. Ohne Unterschrift bleibt das Feld leer.</p>
+    <p class="footnote">Steht unten auf der Reisekostenabrechnung.</p>
 
     <h2 class="section-title">Datensicherung</h2>
     <div class="card list">
       <button class="list-btn" data-act="backup-export">Sicherung speichern …</button>
       <label class="list-btn">Sicherung einlesen …<input type="file" multiple accept="${IMPORT_ACCEPT}" data-act-change="backup-import" hidden></label>
     </div>
-    <p class="footnote">Deine Zettel sind nur auf diesem iPhone. Speichere ab und zu eine Sicherung in iCloud Drive. Beim Einlesen geht nichts verloren.</p>
-    <p class="footnote">Einlesen geht auch mit Stundenzetteln als Numbers- oder PDF-Datei, auch mehrere auf einmal.</p>
+    <p class="footnote">Deine Daten sind nur auf diesem iPhone – sichere sie ab und zu.</p>
+    <p class="footnote">Einlesen geht auch mit Numbers- oder PDF-Zetteln.</p>
     <p class="footnote center muted">${sheets.length} Stundenzettel gespeichert</p>`;
 }
 
@@ -2080,7 +2079,7 @@ function hiddenSuggestionsHTML() {
             .join('')}</div>`
         : ''
     }
-    <p class="footnote">Lange auf einen Vorschlag über der Tastatur drücken, um ihn auszublenden.</p>`;
+    <p class="footnote">Lange drücken blendet einen Vorschlag aus.</p>`;
 }
 
 function exportBackup() {
