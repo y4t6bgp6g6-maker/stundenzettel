@@ -682,7 +682,7 @@ function statsCardHTML() {
   const ot = yearBalance(overtimeAccount().get(year) || new Map());
   return `<a draggable="false" class="card stats-card" href="#/uebersicht">
     <span class="stats-year">${year}</span>
-    <span class="stats-item"><span class="stats-num">${st.urlaub}</span><span class="stats-label">${st.urlaub === 1 ? 'Urlaubstag' : 'Urlaubstage'}</span></span>
+    <span class="stats-item"><span class="stats-num">${st.urlaub}</span><span class="stats-label">Urlaub genommen</span></span>
     <span class="stats-item"><span class="stats-num ${balanceClass(ot)}">${hoursHTML(ot)}</span><span class="stats-label">Überstunden</span></span>
     <span class="list-chevron">${ICON.chevronRight}</span>
   </a>`;
@@ -725,7 +725,7 @@ function renderStats() {
           <div class="ov-tile">
             <span class="ov-icon vac">${OV_ICON.sun}</span>
             <span class="ov-num">${fmtNum(st.urlaub)}</span>
-            <span class="ov-label">${st.urlaub === 1 ? 'Urlaubstag' : 'Urlaubstage'}</span>
+            <span class="ov-label">Urlaub genommen</span>
           </div>
           <div class="ov-tile">
             <span class="ov-icon sick">${OV_ICON.cross}</span>
